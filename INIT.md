@@ -1,24 +1,28 @@
 # tsfire
 
-experimental browser engine in rust. fetches pages, parses html/css, builds render tree.
+experimental browser engine in rust. fetches pages, parses html/css, builds render tree, computes layout.
 
 ## project structure
 
 ```
 src/
-├── main.rs      entry: fetch page → parse dom → build render tree → dump
+├── main.rs      entry: fetch → dom → css → render tree → layout → dump
 ├── network.rs   user-agent builder
 ├── parse.rs     html parser (html5ever), css parser & selector matching (cssparser + selectors)
-└── render.rs    render tree builder & dumper
+├── render.rs    render tree builder & style integration
+├── style.rs     css value types, computedvalues, cascade with specificity
+└── layout.rs    layoutengine trait, box tree with positioned/sized rects
 ```
 
 dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors, precomputed-hash
 
 ## current state
 
-- html → dom → render tree → `dump()` (tree print)
-- css collection & parsing exists, but style matching is **not** yet integrated into render tree
-- workflow: `cargo run` fetches wikipedia.org and prints tree
+- html → dom → css collection → cascade (specificity sort + merge) → styled render tree
+- block + inline layout → positioned `LayoutBox` tree with computed styles
+- `LayoutEngine` trait for swappable layout backends
+- dump shows render tree (with style attrs) and layout tree (with coordinates + sizes)
+- workflow: `cargo run` fetches wikipedia.org, prints both trees
 
 ## ai code rules
 

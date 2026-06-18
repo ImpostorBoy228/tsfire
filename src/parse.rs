@@ -568,6 +568,21 @@ impl<'i> RuleBodyItemParser<'i, (String, String), cssparser::ParseError<'i, ()>>
     fn parse_qualified(&self) -> bool { false }
 }
 
+pub fn collect_css(dom: &RcDom) -> Vec<CssRule> {
+    let mut all_rules = Vec::new();
+    let mut collector = |node: &Handle| {
+        if let NodeData::Element { name, .. } = &node.data {
+            if name.local.as_ref() == "style" {
+                let css_text = element_text_contents(node);
+                let rules = parse_css(&css_text);
+                all_rules.extend(rules);
+            }
+        }
+    };
+    walk(&dom.document, &mut collector);
+    all_rules
+}
+
 pub fn parse_css(css_text: &str) -> Vec<CssRule> {
     let mut input = ParserInput::new(css_text);
     let mut parser = CssParser::new(&mut input);
