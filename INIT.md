@@ -60,7 +60,7 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 
 ### done
 - [x] deutf8() validation — continuation bytes, overlong, surrogates, >U+10FFFF
-- [x] freetype2 optional (`feature = "freetype"`, default on). CI builds with `--no-default-features`
+- [x] freetype2 auto-detected at build time; falls back to chars*0.6 estimate when missing
 
 ### plan: webrender integration
 1. **window + gpu context** — add `winit` + `wgpu` (or `glutin`) to deps. create window, init wgpu surface/device.

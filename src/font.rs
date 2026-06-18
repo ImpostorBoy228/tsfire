@@ -1,4 +1,5 @@
-#[cfg(feature = "freetype")]
+// real freetype backend — only compiled when freetype2 found at build time
+#[cfg(freetype_avail)]
 mod imp {
     use std::ffi::c_void;
     use std::ptr;
@@ -20,11 +21,7 @@ mod imp {
     unsafe extern "C" {
         fn font_load(data: *const u8, len: std::ffi::c_ulong, pixel_size: f32) -> *mut c_void;
         fn font_free(font: *mut c_void);
-        fn cock_measure(
-            font: *mut c_void,
-            utf8: *const u8,
-            len: std::ffi::c_ulong,
-        ) -> f32;
+        fn cock_measure(font: *mut c_void, utf8: *const u8, len: std::ffi::c_ulong) -> f32;
         fn font_fill_glyphs(
             font: *mut c_void,
             utf8: *const u8,
@@ -57,13 +54,7 @@ mod imp {
         }
 
         pub fn measure(&self, text: &str) -> f32 {
-            unsafe {
-                cock_measure(
-                    self.inner,
-                    text.as_ptr(),
-                    text.len() as std::ffi::c_ulong,
-                )
-            }
+            unsafe { cock_measure(self.inner, text.as_ptr(), text.len() as std::ffi::c_ulong) }
         }
 
         pub fn fill_glyphs(&self, text: &str) -> Option<(Vec<GlyphInfo>, Vec<u8>)> {
@@ -130,7 +121,8 @@ mod imp {
     }
 }
 
-#[cfg(not(feature = "freetype"))]
+// stub — used when freetype2 is not available
+#[cfg(not(freetype_avail))]
 mod imp {
     pub struct GlyphInfo;
 
@@ -141,8 +133,7 @@ mod imp {
             None
         }
 
-        pub fn measure(&self, text: &str) -> f32 {
-            // fallback: estimate like old layout
+        pub fn measure(&self, _text: &str) -> f32 {
             0.0
         }
 
@@ -154,7 +145,7 @@ mod imp {
 
 pub use imp::*;
 
-#[cfg(feature = "freetype")]
+#[cfg(freetype_avail)]
 #[cfg(test)]
 mod tests {
     use super::*;

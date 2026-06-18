@@ -33,24 +33,24 @@ fn main() {
     println!("cargo:rerun-if-changed=src/cmod/image_handler.c");
 
     // --- font_handler (optional, needs freetype2) ---
-    #[cfg(feature = "freetype")]
-    {
-        if let Ok(ft) = pkg_config::Config::new().probe("freetype2") {
-            let mut font_build = cc::Build::new();
-            font_build
-                .file(src_dir.join("font_handler.c"))
-                .include(&src_dir);
-            for path in &ft.include_paths {
-                font_build.include(path);
-            }
-            font_build.compile("font_handler");
-
-            println!("cargo:rustc-link-arg={}", out_dir.join("libfont_handler.a").display());
-            println!("cargo:rustc-link-arg=-lfreetype");
-            println!("cargo:rerun-if-changed=src/cmod/font_handler.c");
-            println!("cargo:rerun-if-changed=src/cmod/font_handler.h");
-        } else {
-            println!("cargo:warning=freetype2 not found, font support disabled");
+    if let Ok(ft) = pkg_config::Config::new().probe("freetype2") {
+        let mut font_build = cc::Build::new();
+        font_build
+            .file(src_dir.join("font_handler.c"))
+            .include(&src_dir);
+        for path in &ft.include_paths {
+            font_build.include(path);
         }
+        font_build.compile("font_handler");
+
+        println!("cargo:rustc-link-arg={}", out_dir.join("libfont_handler.a").display());
+        println!("cargo:rustc-link-arg=-lfreetype");
+        println!("cargo:rerun-if-changed=src/cmod/font_handler.c");
+        println!("cargo:rerun-if-changed=src/cmod/font_handler.h");
+
+        // signal to font.rs + layout.rs that freetype is actually usable
+        println!("cargo:rustc-cfg=freetype_avail");
+    } else {
+        println!("cargo:warning=freetype2 not found, font support disabled");
     }
 }

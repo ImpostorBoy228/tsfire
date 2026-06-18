@@ -1,9 +1,9 @@
 use crate::style::{ComputedValues, Display, Length};
 use crate::render::RenderNode;
 
-#[cfg(feature = "freetype")]
+#[cfg(freetype_avail)]
 use std::sync::OnceLock;
-#[cfg(feature = "freetype")]
+#[cfg(freetype_avail)]
 use crate::font::FontHandle;
 
 // --- Geometry types ---
@@ -196,26 +196,35 @@ fn layout_inlines(nodes: &[&RenderNode], containing: &Rect, cursor: &mut Vec2) -
     boxes
 }
 
-#[cfg(feature = "freetype")]
-fn font_cache() -> &'static FontHandle {
-    static FONT: OnceLock<FontHandle> = OnceLock::new();
+#[cfg(freetype_avail)]
+fn font_cache() -> Option<&'static FontHandle> {
+    static FONT: OnceLock<Option<FontHandle>> = OnceLock::new();
     FONT.get_or_init(|| {
-        let data = include_bytes!("/usr/share/fonts/noto/NotoSans-Regular.ttf");
-        FontHandle::load(data, 16.0).expect("Failed to load font")
+        let paths = [
+            "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ];
+        for path in &paths {
+            if let Ok(data) = std::fs::read(path) {
+                if let Some(font) = FontHandle::load(&data, 16.0) {
+                    return Some(font);
+                }
+            }
+        }
+        None
     })
+    .as_ref()
 }
 
 fn estimate_text_width(text: &str, font_size: f32) -> f32 {
-    #[cfg(feature = "freetype")]
-    {
-        let font = font_cache();
-        font.measure(text) * (font_size / 16.0)
+    #[cfg(freetype_avail)]
+    if let Some(font) = font_cache() {
+        return font.measure(text) * (font_size / 16.0);
     }
-    #[cfg(not(feature = "freetype"))]
-    {
-        let char_w = font_size * 0.6;
-        text.len() as f32 * char_w
-    }
+
+    let char_w = font_size * 0.6;
+    text.len() as f32 * char_w
 }
 
 fn resolve_length(length: &Length, _parent_width: f32) -> f32 {

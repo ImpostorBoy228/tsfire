@@ -58,13 +58,11 @@ src/
 ## building
 
 ```sh
-# default (requires freetype2 + pkg-config)
 cargo build
 cargo run
-
-# without freetype2 (fallback to chars*0.6 estimate)
-cargo build --no-default-features
 ```
+
+freetype2 is auto-detected. if missing, font measurement falls back to `chars*0.6` estimate.
 
 ## dependencies
 
