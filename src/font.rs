@@ -143,6 +143,7 @@ mod imp {
     }
 }
 
+#[cfg_attr(not(freetype_avail), allow(unused_imports))]
 pub use imp::*;
 
 #[cfg(freetype_avail)]
