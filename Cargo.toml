@@ -8,6 +8,19 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["rustls-tls"] }
 html5ever = "0.39.0"
 markup5ever_rcdom = "0.39.0"
-cssparser = "0.37.0"
-selectors = "0.38.0"
 precomputed-hash = "0.1"
+cssparser = "0.37.0"
+euclid = "0.22"
+app_units = "0.7.8"
+
+string_cache = "0.9"
+web_atoms = "0.2.4"
+url = "2"
+
+# Servo stylo workspace
+selectors = { git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
+servo_arc = { git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
+style = { package = "stylo", git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
+stylo_atoms = { git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
+dom = { package = "stylo_dom", git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
+style_traits = { package = "stylo_traits", git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
