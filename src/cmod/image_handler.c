@@ -5,7 +5,7 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 
-#include "stb_image.h"
+#include "stb_image.h" // download from https://github.com/nothings/stb/blob/master/stb_image.h
 
 int idecode(const unsigned char *data, unsigned long len,
                     unsigned char **out_rgba, int *out_w, int *out_h) {
