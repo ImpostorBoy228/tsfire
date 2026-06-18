@@ -538,16 +538,10 @@ impl<'i> DeclarationParser<'i> for MyDeclarationParser {
         input: &mut CssParser<'i, 't>,
         _declaration_start: &cssparser::ParserState,
     ) -> Result<Self::Declaration, cssparser::ParseError<'i, Self::Error>> {
-        let value = input
-            .try_parse(|input| {
-                let start = input.position();
-                while let Ok(_) = input.expect_ident() {
-                }
-                let slice = input.slice_from(start);
-                Ok(slice.to_string())
-            })
-            .unwrap_or_else(|_: cssparser::ParseError<'i, ()>| "".to_string());
-        Ok((name.to_string(), value))
+        let start = input.position();
+        while input.next().is_ok() {}
+        let value = input.slice_from(start).to_string();
+        Ok((name.to_string(), value.trim().to_string()))
     }
 }
 
