@@ -1,6 +1,7 @@
 use markup5ever_rcdom::{Handle, NodeData};
 use crate::parse::{CssRule, DomElement};
-use crate::style::{self, ComputedValues};
+use crate::style::ComputedValues;
+use crate::stylo_integration;
 
 #[derive(Debug)]
 pub struct RenderNode {
@@ -11,14 +12,15 @@ pub struct RenderNode {
 }
 
 pub fn build(node: &Handle, rules: &[CssRule]) -> Option<RenderNode> {
-    build_inner(node, rules, None)
+    let stylist = stylo_integration::create_global_stylist();
+    build_inner(node, rules, &stylist, None)
 }
 
-fn build_inner(node: &Handle, rules: &[CssRule], parent_style: Option<&ComputedValues>) -> Option<RenderNode> {
+fn build_inner(node: &Handle, rules: &[CssRule], stylist: &style::stylist::Stylist, parent_style: Option<&ComputedValues>) -> Option<RenderNode> {
     match &node.data {
         NodeData::Document => {
             for child in node.children.borrow().iter() {
-                if let Some(rc) = build_inner(child, rules, parent_style) {
+                if let Some(rc) = build_inner(child, rules, stylist, parent_style) {
                     return Some(rc);
                 }
             }
@@ -33,9 +35,9 @@ fn build_inner(node: &Handle, rules: &[CssRule], parent_style: Option<&ComputedV
             }
 
             let element = DomElement { node: node.clone() };
-            let mut cv = style::cascade(rules, &element);
+            let mut cv = stylo_integration::compute_style_bridge(stylist, rules, &element);
             if let Some(parent) = parent_style {
-                if cv.color == style::Color(0, 0, 0, 255) {
+                if cv.color == crate::style::Color(0, 0, 0, 255) {
                     cv.color = parent.color.clone();
                 }
                 if (cv.font_size - 16.0).abs() < f32::EPSILON {
@@ -45,7 +47,7 @@ fn build_inner(node: &Handle, rules: &[CssRule], parent_style: Option<&ComputedV
 
             let mut children = Vec::new();
             for child in node.children.borrow().iter() {
-                if let Some(rc) = build_inner(child, rules, Some(&cv)) {
+                if let Some(rc) = build_inner(child, rules, stylist, Some(&cv)) {
                     children.push(rc);
                 }
             }

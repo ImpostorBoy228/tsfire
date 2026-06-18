@@ -15,17 +15,20 @@ src/
 └── stylo_integration.rs   mozilla stylo css engine integration
 ```
 
-dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors, precomputed-hash, euclid, app_units, string_cache, web_atoms, stylo_atoms, stylo, dom, style_traits
+dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors, precomputed-hash, euclid, app_units, string_cache, web_atoms, stylo_atoms, stylo, dom, style_traits, url
 
 ## current state
 
-- html → dom → css collection → stylo css engine integration
-- full css cascade, selector matching, and style computation via mozilla's stylo engine
+- html → dom → css collection → stylo css engine (bridge architecture)
+- css selector matching via `selectors` crate (kept from old system)
+- css property parsing + computation via mozilla's stylo engine
+- bridge converts stylo's `ComputedValues` → custom `style::ComputedValues` (used by layout/paint)
 - block layout → positioned `LayoutBox` tree with computed styles
 - `LayoutEngine` trait for swappable layout backends
 - paint system with display list rendering
 - dump shows render tree (with style attrs) and layout tree (with coordinates + sizes)
 - workflow: `cargo run` fetches wikipedia.org, prints both trees
+- unused code in `style.rs` (old cascade) preserved for reference
 
 ## ai code rules
 

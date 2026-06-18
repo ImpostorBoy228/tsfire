@@ -409,7 +409,6 @@ pub fn create_global_stylist() -> Stylist {
     let viewport = Size2D::<f32, CSSPixel>::new(1024.0, 768.0);
     
     let provider: Box<dyn FontMetricsProvider> = Box::new(MockFontMetrics);
-    let guard = SharedRwLock::new_leaked();
     
     let device = Device::new(
         MediaType::screen(),
@@ -438,4 +437,163 @@ pub fn compute_style(
     let guards = StylesheetGuards::same(&guard);
     let parent = parent_style.unwrap_or_else(|| stylist.device().default_computed_values());
     stylist.compute_for_declarations::<PhantomElement>(&guards, parent, declarations)
+}
+
+// --- Bridge: Stylo → custom style.rs ComputedValues ---
+
+/// Parse CSS declaration text into Stylo's PropertyDeclarationBlock
+pub fn parse_css_declarations(css: &str) -> PropertyDeclarationBlock {
+    let url = url::Url::parse("about:blank").unwrap();
+    let url_data = UrlExtraData::from(url);
+    parse_style_attribute(
+        css,
+        &url_data,
+        None,
+        QuirksMode::NoQuirks,
+        CssRuleType::Style,
+    )
+}
+
+/// Convert matching CssRules into a single CSS declaration string
+pub fn matched_declarations_to_css(rules: &[crate::parse::CssRule], element: &crate::parse::DomElement) -> String {
+    use crate::parse::rule_matches_element;
+    let mut css = String::new();
+    let mut matched: Vec<(&crate::parse::CssRule, u32)> = Vec::new();
+    for rule in rules {
+        if rule_matches_element(rule, element) {
+            let spec = rule.selectors.iter()
+                .map(|s| {
+                    let saf: u32 = s.specificity().into();
+                    saf
+                })
+                .max()
+                .unwrap_or(0);
+            matched.push((rule, spec));
+        }
+    }
+    matched.sort_by_key(|(_, spec)| *spec);
+    for (rule, _) in &matched {
+        for (prop, val) in &rule.declarations {
+            css.push_str(prop);
+            css.push(':');
+            css.push_str(val);
+            css.push(';');
+        }
+    }
+    css
+}
+
+/// Convert Stylo's ComputedValues to our custom format
+pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::style::ComputedValues {
+    use crate::style::{ComputedValues as OurCV, Color, Display, Length, Position};
+    use style::color::ColorSpace;
+
+    let box_ = stylo.get_box();
+
+    let display = match box_.display {
+        style::values::computed::Display::None => Display::None,
+        style::values::computed::Display::Inline => Display::Inline,
+        _ => Display::Block,
+    };
+
+    let position = match box_.position {
+        style::values::computed::PositionProperty::Absolute => Position::Absolute,
+        style::values::computed::PositionProperty::Fixed => Position::Fixed,
+        style::values::computed::PositionProperty::Relative => Position::Relative,
+        _ => Position::Static,
+    };
+
+    let position_ = stylo.get_position();
+    let margin_ = stylo.get_margin();
+    let padding_ = stylo.get_padding();
+    let inherited_text = stylo.get_inherited_text();
+    let background = stylo.get_background();
+
+    let width = match &position_.width {
+        style::values::generics::length::GenericSize::LengthPercentage(lp) => {
+            lp.0.to_length().map(|l| Length::Px(l.px())).unwrap_or(Length::Auto)
+        }
+        _ => Length::Auto,
+    };
+
+    let height = match &position_.height {
+        style::values::generics::length::GenericSize::LengthPercentage(lp) => {
+            lp.0.to_length().map(|l| Length::Px(l.px())).unwrap_or(Length::Auto)
+        }
+        _ => Length::Auto,
+    };
+
+    let to_margin = |m: &style::values::generics::length::GenericMargin<style::values::computed::LengthPercentage>| -> Length {
+        match m {
+            style::values::generics::length::GenericMargin::LengthPercentage(lp) => {
+                lp.to_length().map(|l| Length::Px(l.px())).unwrap_or(Length::Auto)
+            }
+            _ => Length::Auto,
+        }
+    };
+
+    let to_padding = |lp: &style::values::computed::NonNegativeLengthPercentage| -> Length {
+        lp.0.to_length().map(|l| Length::Px(l.px())).unwrap_or(Length::Auto)
+    };
+
+    let color_abs = &inherited_text.color;
+    let color = {
+        let srgb = color_abs.to_color_space(ColorSpace::Srgb);
+        Color(
+            (srgb.components.0 * 255.0) as u8,
+            (srgb.components.1 * 255.0) as u8,
+            (srgb.components.2 * 255.0) as u8,
+            (srgb.alpha * 255.0) as u8,
+        )
+    };
+
+    let bg_raw = &background.background_color;
+    let bg = {
+        let abs = bg_raw.resolve_to_absolute(&style::color::AbsoluteColor::BLACK);
+        let srgb = abs.to_color_space(ColorSpace::Srgb);
+        Color(
+            (srgb.components.0 * 255.0) as u8,
+            (srgb.components.1 * 255.0) as u8,
+            (srgb.components.2 * 255.0) as u8,
+            (srgb.alpha * 255.0) as u8,
+        )
+    };
+    let font_size = stylo.get_font().font_size.computed_size.0.px();
+    let z_index = match &position_.z_index {
+        style::values::generics::position::GenericZIndex::Integer(i) => *i,
+        _ => 0,
+    };
+
+    OurCV {
+        display,
+        position,
+        width,
+        height,
+        margin_top: to_margin(&margin_.margin_top),
+        margin_right: to_margin(&margin_.margin_right),
+        margin_bottom: to_margin(&margin_.margin_bottom),
+        margin_left: to_margin(&margin_.margin_left),
+        padding_top: to_padding(&padding_.padding_top),
+        padding_right: to_padding(&padding_.padding_right),
+        padding_bottom: to_padding(&padding_.padding_bottom),
+        padding_left: to_padding(&padding_.padding_left),
+        color,
+        background_color: bg,
+        font_size,
+        z_index,
+    }
+}
+
+/// Compute style for an element using Stylo, returning our custom format
+pub fn compute_style_bridge(
+    stylist: &Stylist,
+    rules: &[crate::parse::CssRule],
+    element: &crate::parse::DomElement,
+) -> crate::style::ComputedValues {
+    let css = matched_declarations_to_css(rules, element);
+    let pdb = parse_css_declarations(&css);
+    let lock = GUARD_LOCK.get_or_init(|| SharedRwLock::new_leaked());
+    let wrapped = Arc::new(lock.wrap(pdb));
+    let stylo_cv = compute_style(stylist, None, wrapped);
+    convert_stylo_computed_values(&stylo_cv)
 }
