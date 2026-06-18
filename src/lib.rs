@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 mod image_handler;
 
 pub use image_handler::ImageData;
