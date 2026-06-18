@@ -7,6 +7,10 @@ edition = "2024"
 cc = "1.0"
 pkg-config = "0.3"
 
+[features]
+default = ["freetype"]
+freetype = []
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["rustls-tls"] }

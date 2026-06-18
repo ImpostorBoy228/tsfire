@@ -22,13 +22,23 @@ these decisions are non-negotiable. anything that adds per-element heap allocati
 
 ```
 src/
-├── main.rs      entry: fetch → dom → css → render tree → layout → dump
+├── main.rs      entry: fetch → dom → css → render tree → layout → display list
 ├── network.rs   user-agent builder
 ├── parse.rs     html parser (html5ever), css collection
 ├── render.rs    render tree builder
-├── layout.rs    layoutengine trait, box tree with positioned/sized rects
-├── paint.rs     display list builder and renderer
-└── stylo_integration.rs   mozilla stylo css engine integration
+├── layout.rs    layoutengine trait, box tree with font-based text measurement
+├── paint.rs     display list builder
+├── style.rs     old cascade (preserved for reference)
+├── stylo_integration.rs   mozilla stylo css engine integration
+├── image_handler.rs   stb_image FFI (png/jpeg/webp → rgba)
+├── font.rs            freetype FFI (ttf → glyph metrics + bitmap)
+├── cache.rs           (reserved)
+├── lib.rs             crate root, re-exports
+└── cmod/
+    ├── image_handler.c   stb_image wrapper
+    ├── stb_image.h       single-file image decoder
+    ├── font_handler.c    freetype wrapper (load, measure, fill_glyphs)
+    └── font_handler.h    GlyphInfo struct
 ```
 
 dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors, precomputed-hash, euclid, app_units, string_cache, web_atoms, stylo_atoms, stylo, dom, style_traits, url
@@ -47,7 +57,25 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 - unused code in `style.rs` (old cascade) preserved for reference
 
 ## TODO
-- deutf8() in font handler -- **unsafe**
+
+### done
+- [x] deutf8() validation — continuation bytes, overlong, surrogates, >U+10FFFF
+- [x] freetype2 optional (`feature = "freetype"`, default on). CI builds with `--no-default-features`
+
+### plan: webrender integration
+1. **window + gpu context** — add `winit` + `wgpu` (or `glutin`) to deps. create window, init wgpu surface/device.
+2. **webrender** — add to deps. init `webrender::Renderer` with wgpu backend.
+3. **display list bridge** — rewrite `paint::build_display_list` → webrender `Transaction`:
+   - `FillRect` → `webrender::api::PushStackingContext` + `PushRect`
+   - `DrawImage` → `AddImage` + `PushImage`
+   - `TextRun` → `AddGlyphFontInstance` + `PushText` (webrender does glyph rasterization itself, no freetype needed)
+   - `Border` → `PushBorder`
+   - `SetClip/PopClip` → `SetClipRect` / `PopClip`
+4. **text** — webrender has built-in glyph cache (glyph atlas). upload font data once via `AddNativeFont`.
+5. **layout** — update `font_cache()` to load font and register with webrender.
+6. **main loop** — `winit` event loop: fetch → parse → style → layout → build wr display list → render.
+7. **stretch** — scrolling, resize, `<img>` elements via `DrawImage`.
+
 
 ## ai code rules
 

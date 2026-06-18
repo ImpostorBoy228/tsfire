@@ -5,29 +5,43 @@
 
 #include FT_FREETYPE_H
 
+static int is_cont(unsigned char b) {
+    return (b & 0xC0) == 0x80;
+}
+
 static uint32_t deutf8(const unsigned char **p, const unsigned char *end) {
     const unsigned char *s = *p;
     if (s >= end) return 0;
 
     uint32_t c;
+    uint32_t min_cp;
     if ((s[0] & 0x80) == 0) {
         c = s[0];
         *p += 1;
+        return c;
     } else if ((s[0] & 0xE0) == 0xC0) {
-        if (s + 1 >= end) { *p = end; return 0xFFFD; }
-        c = ((s[0] & 0x1F) << 6) | (s[1] & 0x3F);
+        if (s + 1 >= end || !is_cont(s[1])) { *p = end; return 0xFFFD; }
+        c = ((uint32_t)(s[0] & 0x1F) << 6) | (s[1] & 0x3F);
+        min_cp = 0x80;
         *p += 2;
     } else if ((s[0] & 0xF0) == 0xE0) {
-        if (s + 2 >= end) { *p = end; return 0xFFFD; }
-        c = ((s[0] & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+        if (s + 2 >= end || !is_cont(s[1]) || !is_cont(s[2])) { *p = end; return 0xFFFD; }
+        c = ((uint32_t)(s[0] & 0x0F) << 12) | ((uint32_t)(s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+        min_cp = 0x800;
         *p += 3;
     } else if ((s[0] & 0xF8) == 0xF0) {
-        if (s + 3 >= end) { *p = end; return 0xFFFD; }
-        c = ((s[0] & 0x07) << 18) | ((s[1] & 0x3F) << 12) | ((s[2] & 0x3F) << 6) | (s[3] & 0x3F);
+        if (s + 3 >= end || !is_cont(s[1]) || !is_cont(s[2]) || !is_cont(s[3])) { *p = end; return 0xFFFD; }
+        c = ((uint32_t)(s[0] & 0x07) << 18) | ((uint32_t)(s[1] & 0x3F) << 12) | ((uint32_t)(s[2] & 0x3F) << 6) | (s[3] & 0x3F);
+        min_cp = 0x10000;
         *p += 4;
     } else {
-        c = 0xFFFD;
         *p += 1;
+        return 0xFFFD;
+    }
+
+    // reject overlong, surrogates, > U+10FFFF
+    if (c < min_cp || (c >= 0xD800 && c <= 0xDFFF) || c > 0x10FFFF) {
+        return 0xFFFD;
     }
     return c;
 }
@@ -123,7 +137,6 @@ int font_fill_glyphs(void *font,
     int glyph_count = 0;
     size_t total_bytes = 0;
     const unsigned char *scan = p;
-    uint32_t prev_cp = 0;
     int first = 1;
 
     while (scan < end && glyph_count < max_glyphs) {
@@ -137,8 +150,6 @@ int font_fill_glyphs(void *font,
         FT_GlyphSlot slot = face->glyph;
         total_bytes += (size_t)slot->bitmap.rows * slot->bitmap.pitch;
         glyph_count++;
-
-        if (!first) prev_cp = cp;
         first = 0;
     }
 

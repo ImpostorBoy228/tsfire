@@ -1,6 +1,9 @@
 use crate::style::{ComputedValues, Display, Length};
 use crate::render::RenderNode;
+
+#[cfg(feature = "freetype")]
 use std::sync::OnceLock;
+#[cfg(feature = "freetype")]
 use crate::font::FontHandle;
 
 // --- Geometry types ---
@@ -193,6 +196,7 @@ fn layout_inlines(nodes: &[&RenderNode], containing: &Rect, cursor: &mut Vec2) -
     boxes
 }
 
+#[cfg(feature = "freetype")]
 fn font_cache() -> &'static FontHandle {
     static FONT: OnceLock<FontHandle> = OnceLock::new();
     FONT.get_or_init(|| {
@@ -202,8 +206,16 @@ fn font_cache() -> &'static FontHandle {
 }
 
 fn estimate_text_width(text: &str, font_size: f32) -> f32 {
-    let font = font_cache();
-    font.measure(text) * (font_size / 16.0)
+    #[cfg(feature = "freetype")]
+    {
+        let font = font_cache();
+        font.measure(text) * (font_size / 16.0)
+    }
+    #[cfg(not(feature = "freetype"))]
+    {
+        let char_w = font_size * 0.6;
+        text.len() as f32 * char_w
+    }
 }
 
 fn resolve_length(length: &Length, _parent_width: f32) -> f32 {
