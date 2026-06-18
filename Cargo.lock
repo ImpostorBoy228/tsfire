@@ -1561,6 +1561,7 @@ dependencies = [
  "cssparser",
  "html5ever",
  "markup5ever_rcdom",
+ "precomputed-hash",
  "reqwest",
  "selectors",
  "tokio",

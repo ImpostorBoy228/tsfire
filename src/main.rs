@@ -3,6 +3,7 @@ mod parse;
 
 use reqwest::Client;
 use markup5ever_rcdom::NodeData;
+use std::collections::HashMap;
 
 const BROWSER: &str = "tsfire";
 
@@ -35,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Сбор CSS из <style>
     let mut css_buf = String::new();
     parse::walk(&dom.document, &mut |node| {
-        if let NodeData::Element { name, .. } = &node.borrow().data {
+        if let NodeData::Element { name, .. } = &node.data {
             if name.local.as_ref() == "style" {
                 let content = parse::element_text_contents(node);
                 if !content.is_empty() {
@@ -49,15 +50,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rules = parse::parse_css(&css_buf);
     println!("Parsed {} CSS rules.", rules.len());
 
-
     let mut element_styles: Vec<(String, HashMap<String, String>)> = Vec::new();
 
     parse::walk(&dom.document, &mut |node| {
-        if let NodeData::Element { name, .. } = &node.borrow().data {
-            let element = parse::DomElement { node };
+        if let NodeData::Element { name, .. } = &node.data {
+            let element = parse::DomElement { node: node.clone() };
             let mut styles = HashMap::new();
 
-            let mut applicable_rules: Vec<(usize, &parse::CssRule)> = Vec::new();
+            let mut applicable_rules: Vec<(u32, &parse::CssRule)> = Vec::new();
             for rule in &rules {
                 if parse::rule_matches_element(rule, &element) {
                     let specificity = rule.selectors.iter()
