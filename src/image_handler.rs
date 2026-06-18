@@ -69,17 +69,16 @@ impl Drop for ImageData {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const TEST_PNG: &[u8] = include_bytes!("../test.png");
+    use std::fs;
 
     #[test]
     fn test_decode_png() {
-        let img = ImageData::decode(TEST_PNG).expect("decode failed");
+        let bytes = fs::read("test.png").expect("test.png not found in project root");
+        let img = ImageData::decode(&bytes).expect("decode failed");
         assert!(img.width > 0, "width should be > 0, got {}", img.width);
         assert!(img.height > 0, "height should be > 0, got {}", img.height);
         let px = img.pixels();
         assert_eq!(px.len(), (img.width * img.height * 4) as usize, "pixel buffer size mismatch");
-        // check first pixel is valid RGBA (non-zero in at least one channel)
         let non_zero = px.iter().any(|&b| b != 0);
         assert!(non_zero, "image has no non-zero pixels");
         println!("OK: {}x{} RGBA ({} bytes)", img.width, img.height, px.len());
