@@ -1,6 +1,11 @@
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink;
-use markup5ever_rcdom::{Handle, RcDom};
+use markup5ever_rcdom::{Handle, RcDom, NodeData};
+
+use selectors::Element as SelectorElement;
+use selectors::attr::{AttrSelectorOperation, CaseSensitivity, NamespaceConstraint};
+use selectors::matching::{MatchingContext, MatchingMode, matches_selector};
+use std::fmt;
 
 use cssparser::{
     AtRuleParser, DeclarationParser, Parser as CssParser, ParserInput,
@@ -24,11 +29,133 @@ where
     }
 }
 
+// css shit
 #[derive(Debug)]
 pub struct CssRule {
     pub selectors: Vec<String>,
     pub declarations: HashMap<String, String>,
 }
+
+pub struct DomElement<'a> {
+    pub node: &'a Handle,
+}
+
+impl<'a> SelectorElement for DomElement<'a> {
+    type Impl = ();
+
+    fn parent_element(&self) -> Option<Self> {
+        // Ищем родителя, который является элементом
+        let parent = self.node.borrow().parent.clone();
+        parent.and_then(|p| {
+            let p_borrowed = p.borrow();
+            if let NodeData::Element { .. } = p_borrowed.data {
+                Some(DomElement { node: &p })
+            } else {
+                None
+            }
+        })
+    }
+
+    fn has_local_name(&self, local_name: &selectors::parser::LocalName) -> bool {
+        if let NodeData::Element { name, .. } = &self.node.borrow().data {
+            name.local.as_ref() == local_name.as_str()
+        } else {
+            false
+        }
+    }
+
+    fn get_id(&self) -> Option<CaseSensitivity> {
+        // Ищем атрибут id
+        self.get_attr("id")
+            .map(|_| CaseSensitivity::CaseSensitive)
+    }
+
+    fn has_class(&self, name: &str, case_sensitivity: CaseSensitivity) -> bool {
+        if let Some(class_attr) = self.get_attr("class") {
+            // Простой split по пробелам (в реальности нужно учитывать несколько пробелов и табуляцию)
+            class_attr.split_whitespace().any(|c| c == name)
+        } else {
+            false
+        }
+    }
+
+    fn is_html_element(&self) -> bool {
+        true // для простоты считаем все элементы HTML
+    }
+
+    fn is_shadow_host(&self) -> bool {
+        false
+    }
+
+    fn is_visited_link(&self) -> bool {
+        false
+    }
+
+    fn is_active_link(&self) -> bool {
+        false
+    }
+
+    fn is_empty(&self) -> bool {
+        // Проверяем, нет ли дочерних элементов или текстовых узлов
+        // Здесь нужно реализовать корректно для псевдокласса :empty
+        // Упрощённо: считаем пустым, если нет дочерних узлов вообще
+        self.node.children.borrow().is_empty()
+    }
+
+    // Вспомогательный метод для получения значения атрибута
+    fn get_attr(&self, attr_name: &str) -> Option<String> {
+        if let NodeData::Element { attrs, .. } = &self.node.borrow().data {
+            for attr in attrs.borrow().iter() {
+                if attr.name.local.as_ref() == attr_name {
+                    return Some(attr.value.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    // Другие методы трейта можно оставить с реализациями по умолчанию,
+    // но мы их переопределим для более точного сопоставления:
+    fn attr_matches(
+        &self,
+        _ns: &NamespaceConstraint<&Namespace>,
+        local_name: &selectors::parser::LocalName,
+        operation: &AttrSelectorOperation<&str>,
+    ) -> bool {
+        // Проверяем атрибутные селекторы (например, [class="foo"])
+        if let Some(value) = self.get_attr(local_name.as_str()) {
+            match operation {
+                AttrSelectorOperation::Exists => true,
+                AttrSelectorOperation::Equals(val) => value == *val,
+                AttrSelectorOperation::Includes(val) => {
+                    value.split_whitespace().any(|part| part == *val)
+                }
+                AttrSelectorOperation::DashMatch(val) => {
+                    value == *val || value.starts_with(&format!("{}-", val))
+                }
+                AttrSelectorOperation::Prefix(val) => value.starts_with(val),
+                AttrSelectorOperation::Suffix(val) => value.ends_with(val),
+                AttrSelectorOperation::Substring(val) => value.contains(val),
+            }
+        } else {
+            false
+        }
+    }
+
+    // Также нужно реализовать методы для псевдоклассов, но для начала оставим заглушки.
+}
+
+pub fn rule_matches_element(rule: &CssRule, element: &DomElement) -> bool {
+    let context = MatchingContext::new(MatchingMode::Normal);
+    for selector in &rule.selectors {
+        if matches_selector(selector, element, &context, &mut |_, _| false) {
+            return true;
+        }
+    }
+    false
+}
+
+// ---------------------------------------------------------
 
 struct MyQualifiedRuleParser;
 
