@@ -1,10 +1,10 @@
 //classlike shit
-pub struct uaBuild {
+pub struct UaBuild {
     app_name: String,
     app_version: String,
 }
 
-impl uaBuild{
+impl UaBuild{
     pub fn new(app_name: &str) -> Self {
         Self {
             app_name: app_name.to_string(),

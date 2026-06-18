@@ -19,7 +19,7 @@ async fn gget(client: &Client, url: &str) ->
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    let uabilder = network::uaBuild::new(BROWSER);
+    let uabilder = network::UaBuild::new(BROWSER);
     let ua = uabilder.build();
     println!("ua: {}\n\n", ua);
     let client = Client::builder()
