@@ -1,7 +1,11 @@
 [package]
 name = "tsfire"
-version = "0.1.0"
+version = "0.1.1337"
 edition = "2024"
+
+[build-dependencies]
+cc = "1.0"
+pkg-config = "0.3"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

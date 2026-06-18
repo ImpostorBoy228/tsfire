@@ -1,5 +1,7 @@
 use crate::style::{ComputedValues, Display, Length};
 use crate::render::RenderNode;
+use std::sync::OnceLock;
+use crate::font::FontHandle;
 
 // --- Geometry types ---
 
@@ -191,9 +193,17 @@ fn layout_inlines(nodes: &[&RenderNode], containing: &Rect, cursor: &mut Vec2) -
     boxes
 }
 
+fn font_cache() -> &'static FontHandle {
+    static FONT: OnceLock<FontHandle> = OnceLock::new();
+    FONT.get_or_init(|| {
+        let data = include_bytes!("/usr/share/fonts/noto/NotoSans-Regular.ttf");
+        FontHandle::load(data, 16.0).expect("Failed to load font")
+    })
+}
+
 fn estimate_text_width(text: &str, font_size: f32) -> f32 {
-    let char_w = font_size * 0.6;
-    text.len() as f32 * char_w
+    let font = font_cache();
+    font.measure(text) * (font_size / 16.0)
 }
 
 fn resolve_length(length: &Length, _parent_width: f32) -> f32 {

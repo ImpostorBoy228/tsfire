@@ -5,6 +5,8 @@ mod style;
 mod layout;
 mod paint;
 mod stylo_integration;
+mod image_handler;
+mod font;
 
 use reqwest::Client;
 
@@ -17,7 +19,6 @@ async fn gget(client: &Client, url: &str) ->
         .await?
         .text()
         .await?;
-
     Ok(body)
 }
 
@@ -26,13 +27,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let uabilder = network::UaBuild::new(BROWSER);
     let ua = uabilder.build();
-    println!("ua: {}\n\n", ua);
     let client = Client::builder()
         .user_agent(ua)
         .build()?;
-    // fuck ua tech
 
-    let response = gget(&client, "https://wikipedia.org").await?;
+    let response = gget(&client, "https://example.com/").await?;
 
     let dom = parse::phtml(&response);
 
@@ -61,30 +60,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::style::properties::PropertyDeclarationBlock;
-    use ::style::shared_lock::{SharedRwLock, StylesheetGuards};
-    use ::style::servo_arc::Arc;
-    
+
     #[test]
     fn test_stylo_integration() {
-        // Create a stylist
         let stylist = stylo_integration::create_global_stylist();
-        
-        // Create a lock and use it for both the PDB and in compute_style
-        let lock = SharedRwLock::new();
-        let pdb = Arc::new(lock.wrap(PropertyDeclarationBlock::new()));
-        
-        // Compute style with no parent
+        let lock = ::style::shared_lock::SharedRwLock::new();
+        let pdb = ::style::servo_arc::Arc::new(
+            lock.wrap(::style::properties::PropertyDeclarationBlock::new())
+        );
         let guard = lock.read();
-        let guards = StylesheetGuards::same(&guard);
+        let guards = ::style::shared_lock::StylesheetGuards::same(&guard);
         let computed = stylist.compute_for_declarations::<stylo_integration::PhantomElement>(
-            &guards, 
-            stylist.device().default_computed_values(), 
+            &guards,
+            stylist.device().default_computed_values(),
             pdb
         );
-        
-        // Verify we got a computed values object
-        // Just check that we can access some field - display is a good one
         assert!(computed.get_box().display != ::style::values::computed::Display::None);
     }
 }

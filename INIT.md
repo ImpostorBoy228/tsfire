@@ -2,6 +2,22 @@
 
 experimental browser engine in rust. fetches pages, parses html/css, builds render tree, computes layout.
 
+**primary goal:** lower memory (ram) footprint than chrome/firefox
+
+every design decision prioritizes this. no multi-process per tab, no gecko-level bloat, minimal copies.
+
+## ram-critical design rules
+
+1. **no pixel buffers per element** — display list stores commands (~32 bytes each), not rasterized buffers (240KB for 300×200px element)
+2. **no shadow dom allocations** — no deep copies of style structs per node
+3. **single process** — one global stylist, one lock, one arena. chrome pays 100+ MB per tab process
+4. **zero-copy where possible** — css text → parser → property values, no intermediate string maps
+5. **lazy decode** — images decoded on first paint, freed when not visible
+6. **no precomputed layout cache** — layout is cheap, storing it for 50k nodes is not
+7. **glyph atlas, not per-text allocations** — font textures shared, not duplicated
+
+these decisions are non-negotiable. anything that adds per-element heap allocations is a design error.
+
 ## project structure
 
 ```
@@ -29,6 +45,9 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 - dump shows render tree (with style attrs) and layout tree (with coordinates + sizes)
 - workflow: `cargo run` fetches wikipedia.org, prints both trees
 - unused code in `style.rs` (old cascade) preserved for reference
+
+## TODO
+- deutf8() in font handler -- **unsafe**
 
 ## ai code rules
 
