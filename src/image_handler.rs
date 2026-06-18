@@ -69,12 +69,12 @@ impl Drop for ImageData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+
+    const TEST_PNG: &[u8] = include_bytes!("../test.png");
 
     #[test]
     fn test_decode_png() {
-        let bytes = fs::read("test.png").expect("test.png not found in project root");
-        let img = ImageData::decode(&bytes).expect("decode failed");
+        let img = ImageData::decode(TEST_PNG).expect("decode failed");
         assert!(img.width > 0, "width should be > 0, got {}", img.width);
         assert!(img.height > 0, "height should be > 0, got {}", img.height);
         let px = img.pixels();
