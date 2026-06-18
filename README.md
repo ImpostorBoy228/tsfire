@@ -71,11 +71,4 @@ cargo build --no-default-features
 tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors,
 euclid, app_units, string_cache, stylo (servo), freetype2 (optional)
 
-## webrender integration plan
 
-1. **window + gpu context** — add `winit` + `wgpu`, create window + surface
-2. **webrender** — add dep, init `webrender::Renderer` with wgpu backend
-3. **display list bridge** — map DisplayCommand → webrender Transaction
-4. **text** — webrender native glyph atlas, upload font via AddNativeFont
-5. **main loop** — event loop: fetch → parse → style → layout → wr → render
-6. **stretch** — scroll, resize, `<img>`, hit testing
