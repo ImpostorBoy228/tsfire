@@ -8,7 +8,8 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
-use crate::ui_shit::paint::DisplayList;
+use crate::ui_shit::display_renderer;
+use crate::ui_shit::paint;
 
 struct WrappedWindow(Arc<Window>);
 unsafe impl Send for WrappedWindow {}
@@ -29,6 +30,7 @@ struct Renderer {
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    display_renderer: Option<display_renderer::DisplayRenderer>,
 }
 
 impl Renderer {
@@ -76,10 +78,22 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        Ok(Self { device, queue, surface, config })
+        Ok(Self { device, queue, surface, config, display_renderer: None })
     }
 
-    fn render(&self) {
+    fn ensure_renderer(&mut self) {
+        if self.display_renderer.is_none() {
+            self.display_renderer = Some(display_renderer::DisplayRenderer::new(
+                self.device.clone(),
+                self.queue.clone(),
+                self.config.width,
+                self.config.height,
+                self.config.format,
+            ));
+        }
+    }
+
+    fn render(&mut self, list: Option<&paint::DisplayList>) {
         let current = self.surface.get_current_texture();
         let frame = match current {
             wgpu::CurrentSurfaceTexture::Success(st)
@@ -90,37 +104,45 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("tsfire encoder"),
-            });
+        self.ensure_renderer();
 
-        {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("tsfire pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.05,
-                            b: 0.06,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+        if let Some(list) = list {
+            if let Some(renderer) = &mut self.display_renderer {
+                let cmd = renderer.render(&view, list);
+                self.queue.submit(Some(cmd));
+            }
+        } else {
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("tsfire encoder"),
+                });
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("tsfire clear"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.05,
+                                b: 0.06,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            }
+            self.queue.submit(Some(encoder.finish()));
         }
 
-        self.queue.submit(Some(encoder.finish()));
         frame.present();
     }
 
@@ -129,13 +151,16 @@ impl Renderer {
             self.config.width = size.width;
             self.config.height = size.height;
             self.surface.configure(&self.device, &self.config);
+            if let Some(renderer) = &mut self.display_renderer {
+                renderer.resize(size.width, size.height);
+            }
         }
     }
 }
 
 struct App {
     state: Option<WindowState>,
-    _list: DisplayList,
+    display_list: Option<paint::DisplayList>,
 }
 
 struct WindowState {
@@ -188,7 +213,9 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => {
                 state.renderer.resize(size);
             }
-            WindowEvent::RedrawRequested => state.renderer.render(),
+            WindowEvent::RedrawRequested => {
+                state.renderer.render(self.display_list.as_ref());
+            }
             _ => {}
         }
     }
@@ -200,11 +227,11 @@ impl ApplicationHandler for App {
     }
 }
 
-pub fn run(list: DisplayList) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(list: paint::DisplayList) -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
     let mut app = App {
         state: None,
-        _list: list,
+        display_list: Some(list),
     };
     event_loop.run_app(&mut app)?;
     Ok(())

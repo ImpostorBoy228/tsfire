@@ -37,3 +37,4 @@ winit = "0.30.13"
 wgpu = "29.0.3"
 raw-window-handle = "0.6.2"
 pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
