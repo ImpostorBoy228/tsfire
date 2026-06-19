@@ -1,5 +1,5 @@
-use crate::layout::{LayoutBox, Rect, Size};
-use crate::style::{Color, Display};
+use crate::ui_shit::layout::{LayoutBox, Rect, Size};
+use crate::parsing::{Color, Display};
 
 // --- Data types ---
 

@@ -1,5 +1,5 @@
-use crate::style::{ComputedValues, Display, Length};
-use crate::render::RenderNode;
+use crate::parsing::{ComputedValues, Display, Length};
+use crate::parsing::RenderNode;
 
 #[cfg(freetype_avail)]
 use std::sync::OnceLock;

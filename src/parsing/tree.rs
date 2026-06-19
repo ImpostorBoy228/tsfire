@@ -1,7 +1,7 @@
 use markup5ever_rcdom::{Handle, NodeData};
-use crate::parse::{CssRule, DomElement};
-use crate::style::ComputedValues;
-use crate::stylo_integration;
+use super::parse::{CssRule, DomElement};
+use super::style::ComputedValues;
+use super::stylo_integration;
 
 #[derive(Debug)]
 pub struct RenderNode {
@@ -37,7 +37,7 @@ fn build_inner(node: &Handle, rules: &[CssRule], stylist: &style::stylist::Styli
             let element = DomElement { node: node.clone() };
             let mut cv = stylo_integration::compute_style_bridge(stylist, rules, &element);
             if let Some(parent) = parent_style {
-                if cv.color == crate::style::Color(0, 0, 0, 255) {
+                if cv.color == super::style::Color(0, 0, 0, 255) {
                     cv.color = parent.color.clone();
                 }
                 if (cv.font_size - 16.0).abs() < f32::EPSILON {
@@ -100,7 +100,7 @@ fn dump_label(node: &RenderNode) {
 }
 
 fn print_style_attrs(style: &ComputedValues) {
-    use crate::style::{Display, Length, Color};
+    use super::style::{Display, Length, Color};
 
     let mut attrs: Vec<String> = Vec::new();
 

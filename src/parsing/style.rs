@@ -1,4 +1,4 @@
-use crate::parse::{CssRule, DomElement, rule_matches_element};
+use super::parse::{CssRule, DomElement, rule_matches_element};
 
 // --- CSS value types ---
 

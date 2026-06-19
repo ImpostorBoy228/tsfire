@@ -64,18 +64,30 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 - [x] freetype2 auto-detected at build time; falls back to chars*0.6 estimate when missing
 - [x] **window + gpu context** — `winit` + `wgpu` deps added. window created, wgpu surface/device/queue configured. render pass clears window with dark color on each frame. `window.rs` module.
 
-### plan: webrender integration
-2. **webrender** — add to deps. init `webrender::Renderer` with wgpu backend.
-3. **display list bridge** — rewrite `paint::build_display_list` → webrender `Transaction`:
-   - `FillRect` → `webrender::api::PushStackingContext` + `PushRect`
-   - `DrawImage` → `AddImage` + `PushImage`
-   - `TextRun` → `AddGlyphFontInstance` + `PushText` (webrender does glyph rasterization itself, no freetype needed)
-   - `Border` → `PushBorder`
-   - `SetClip/PopClip` → `SetClipRect` / `PopClip`
-4. **text** — webrender has built-in glyph cache (glyph atlas). upload font data once via `AddNativeFont`.
-5. **layout** — update `font_cache()` to load font and register with webrender.
-6. **main loop** — `winit` event loop: fetch → parse → style → layout → build wr display list → render.
-7. **stretch** — scrolling, resize, `<img>` elements via `DrawImage`.
+### plan: wgpu display list renderer (pure winit+wgpu, no webrender)
+
+2. **display renderer module** — `src/ui_shit/display_renderer.rs`:
+   - wgpu pipelines for each `DisplayCommand` type
+   - per-frame geometry batching (solid rects, glyph quads, etc.)
+   - orthographic projection (CSS top-left origin → NDC)
+
+3. **glyph atlas** — freetype `fill_glyphs()` → wgpu texture atlas:
+   - lazy fill: rasterize glyph on first use, cache in `HashMap<(codepoint, font_size), (atlas_rect, metrics)>`
+   - text rendering: TextRun → lookup each char → textured quad with UV in atlas
+
+4. **solid fill pipeline** — `FillRect`: batched quads, solid color shader
+
+5. **textured quad pipeline** — `TextRun` + `DrawImage`: glyph atlas / stb_image → wgpu texture → quads with UV
+
+6. **gradient pipeline** — `FillGradient`: shader interpolates between two colors
+
+7. **clip & opacity** — `SetClip/PopClip` → wgpu scissor rect; `SetOpacity/PopOpacity` → separate blend pipeline
+
+8. **border** — `Border` → 4 solid rects (top, right, bottom, left)
+
+9. **image pipeline** — `image_handler` (stb_image) decode → wgpu texture upload → `DrawImage`
+
+10. **main loop** — winit: fetch → parse → style → layout → build display list → `DisplayRenderer::render()`
 
 
 ## ai code rules

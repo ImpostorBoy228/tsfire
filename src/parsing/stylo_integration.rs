@@ -455,10 +455,10 @@ pub fn parse_css_declarations(css: &str) -> PropertyDeclarationBlock {
 }
 
 /// Convert matching CssRules into a single CSS declaration string
-pub fn matched_declarations_to_css(rules: &[crate::parse::CssRule], element: &crate::parse::DomElement) -> String {
-    use crate::parse::rule_matches_element;
+pub fn matched_declarations_to_css(rules: &[crate::parsing::CssRule], element: &crate::parsing::DomElement) -> String {
+    use crate::parsing::rule_matches_element;
     let mut css = String::new();
-    let mut matched: Vec<(&crate::parse::CssRule, u32)> = Vec::new();
+    let mut matched: Vec<(&crate::parsing::CssRule, u32)> = Vec::new();
     for rule in rules {
         if rule_matches_element(rule, element) {
             let spec = rule.selectors.iter()
@@ -484,8 +484,8 @@ pub fn matched_declarations_to_css(rules: &[crate::parse::CssRule], element: &cr
 }
 
 /// Convert Stylo's ComputedValues to our custom format
-pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::style::ComputedValues {
-    use crate::style::{ComputedValues as OurCV, Color, Display, Length, Position};
+pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::parsing::ComputedValues {
+    use crate::parsing::{ComputedValues as OurCV, Color, Display, Length, Position};
     use style::color::ColorSpace;
 
     let box_ = stylo.get_box();
@@ -587,9 +587,9 @@ pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::style::Co
 /// Compute style for an element using Stylo, returning our custom format
 pub fn compute_style_bridge(
     stylist: &Stylist,
-    rules: &[crate::parse::CssRule],
-    element: &crate::parse::DomElement,
-) -> crate::style::ComputedValues {
+    rules: &[crate::parsing::CssRule],
+    element: &crate::parsing::DomElement,
+) -> crate::parsing::ComputedValues {
     let css = matched_declarations_to_css(rules, element);
     let pdb = parse_css_declarations(&css);
     let lock = GUARD_LOCK.get_or_init(|| SharedRwLock::new_leaked());

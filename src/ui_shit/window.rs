@@ -8,7 +8,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
-use crate::paint::DisplayList;
+use crate::ui_shit::paint::DisplayList;
 
 struct WrappedWindow(Arc<Window>);
 unsafe impl Send for WrappedWindow {}
@@ -105,7 +105,7 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.5,
+                            r: 0.1,
                             g: 0.05,
                             b: 0.06,
                             a: 1.0,

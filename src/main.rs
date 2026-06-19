@@ -1,14 +1,9 @@
 #![allow(dead_code)]
 mod network;
-mod parse;
-mod render;
-mod style;
-mod layout;
-mod paint;
-mod stylo_integration;
+mod parsing;
+mod ui_shit;
 mod image_handler;
 mod font;
-mod window;
 
 use reqwest::Client;
 
@@ -37,30 +32,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .build()?;
 
         let response = gget(&client, "https://example.com/").await?;
-        let dom = parse::phtml(&response);
-        let css_rules = parse::collect_css(&dom);
-        let render_tree = render::build(&dom.document, &css_rules);
+        let dom = parsing::parse::phtml(&response);
+        let css_rules = parsing::parse::collect_css(&dom);
+        let render_tree = parsing::tree::build(&dom.document, &css_rules);
 
-        use layout::LayoutEngine;
+        use ui_shit::layout::LayoutEngine;
 
         let dl = if let Some(tree) = render_tree {
-            render::dump(&tree);
+            parsing::tree::dump(&tree);
 
             println!("\n--- layout tree ---");
-            let layout_engine = layout::BlockLayout;
-            let layout_boxes = layout_engine.layout(&tree, layout::Size { width: 1024.0, height: 768.0 });
-            layout::dump_boxes(&layout_boxes);
+            let layout_engine = ui_shit::layout::BlockLayout;
+            let layout_boxes = layout_engine.layout(&tree, ui_shit::layout::Size { width: 1024.0, height: 768.0 });
+            ui_shit::layout::dump_boxes(&layout_boxes);
 
             println!();
-            let dl = paint::build_display_list(&layout_boxes);
-            paint::dump_display_list(&dl);
+            let dl = ui_shit::paint::build_display_list(&layout_boxes);
+            ui_shit::paint::dump_display_list(&dl);
             dl
         } else {
-            paint::DisplayList {
+            ui_shit::paint::DisplayList {
                 items: vec![],
                 text_arena: String::new(),
                 images: vec![],
-                content_size: layout::Size { width: 1024.0, height: 768.0 },
+                content_size: ui_shit::layout::Size { width: 1024.0, height: 768.0 },
             }
         };
 
@@ -68,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     drop(rt);
-    window::run(dl)?;
+    ui_shit::window::run(dl)?;
     Ok(())
 }
 
@@ -78,14 +73,14 @@ mod tests {
 
     #[test]
     fn test_stylo_integration() {
-        let stylist = stylo_integration::create_global_stylist();
+        let stylist = parsing::stylo_integration::create_global_stylist();
         let lock = ::style::shared_lock::SharedRwLock::new();
         let pdb = ::style::servo_arc::Arc::new(
             lock.wrap(::style::properties::PropertyDeclarationBlock::new())
         );
         let guard = lock.read();
         let guards = ::style::shared_lock::StylesheetGuards::same(&guard);
-        let computed = stylist.compute_for_declarations::<stylo_integration::PhantomElement>(
+        let computed = stylist.compute_for_declarations::<parsing::stylo_integration::PhantomElement>(
             &guards,
             stylist.device().default_computed_values(),
             pdb
