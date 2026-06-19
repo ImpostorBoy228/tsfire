@@ -478,3 +478,61 @@ pub fn run(list: DisplayList) -> Result<(), Box<dyn std::error::Error>> {
     event_loop.run_app(&mut app)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::Rect;
+    use crate::paint::{DisplayCommand, DisplayList};
+    use crate::style::Color;
+
+    #[test]
+    fn test_build_vertices_fill_rect() {
+        let list = DisplayList {
+            items: vec![DisplayCommand::FillRect(
+                Rect { x: 10.0, y: 20.0, width: 100.0, height: 50.0 },
+                Color(255, 0, 0, 255),
+            )],
+            text_arena: String::new(),
+            images: vec![],
+            content_size: crate::layout::Size { width: 1024.0, height: 768.0 },
+        };
+        let verts = build_vertices(&list, 1024.0, 768.0);
+        assert_eq!(verts.len(), 6, "fill rect -> 6 vertices (2 triangles)");
+        let x0_ndc = (10.0 / 1024.0) * 2.0 - 1.0;
+        let y0_ndc = 1.0 - (20.0 / 768.0) * 2.0;
+        assert!((verts[0].position[0] - x0_ndc).abs() < 1e-4);
+        assert!((verts[0].position[1] - y0_ndc).abs() < 1e-4);
+        assert_eq!(verts[0].color, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn test_build_vertices_empty() {
+        let list = DisplayList {
+            items: vec![],
+            text_arena: String::new(),
+            images: vec![],
+            content_size: crate::layout::Size { width: 640.0, height: 480.0 },
+        };
+        let verts = build_vertices(&list, 640.0, 480.0);
+        assert_eq!(verts.len(), 3, "empty display list -> fallback full-screen triangle");
+        assert_eq!(verts[0].color, [0.94, 0.94, 0.94, 1.0]);
+    }
+
+    #[test]
+    fn test_build_vertices_border() {
+        let list = DisplayList {
+            items: vec![DisplayCommand::Border(
+                Rect { x: 0.0, y: 0.0, width: 200.0, height: 100.0 },
+                [crate::paint::BorderSide { width: 2.0, color: Color(0, 255, 0, 255), style: crate::paint::BorderStyle::Solid }; 4],
+            )],
+            text_arena: String::new(),
+            images: vec![],
+            content_size: crate::layout::Size { width: 800.0, height: 600.0 },
+        };
+        let verts = build_vertices(&list, 800.0, 600.0);
+        // border draws 4 rectangles = 4 * 6 = 24 vertices
+        assert_eq!(verts.len(), 24);
+        assert_eq!(verts[0].color, [0.0, 1.0, 0.0, 1.0]);
+    }
+}
