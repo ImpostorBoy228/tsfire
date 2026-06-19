@@ -3335,7 +3335,6 @@ name = "tsfire"
 version = "0.1.1337"
 dependencies = [
  "app_units",
- "bytemuck",
  "cc",
  "cssparser",
  "euclid",

@@ -22,11 +22,11 @@ these decisions are non-negotiable. anything that adds per-element heap allocati
 
 ```
 src/
-├── main.rs      entry: fetch → dom → css → render tree → layout → display list
+├── main.rs      entry: fetch → dom → css → render tree → layout → display list → window
 ├── network.rs   user-agent builder
 ├── parse.rs     html parser (html5ever), css collection
 ├── render.rs    render tree builder
-├── layout.rs    layoutengine trait, box tree with font-based text measurement
+├── layout.rs    layoutengine trait, block/inline layout with font-based text measurement
 ├── paint.rs     display list builder
 ├── style.rs     old cascade (preserved for reference)
 ├── stylo_integration.rs   mozilla stylo css engine integration
@@ -34,6 +34,7 @@ src/
 ├── font.rs            freetype FFI (ttf → glyph metrics + bitmap)
 ├── cache.rs           (reserved)
 ├── lib.rs             crate root, re-exports
+├── window.rs          winit window + wgpu surface/device
 └── cmod/
     ├── image_handler.c   stb_image wrapper
     ├── stb_image.h       single-file image decoder
@@ -61,9 +62,9 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 ### done
 - [x] deutf8() validation — continuation bytes, overlong, surrogates, >U+10FFFF
 - [x] freetype2 auto-detected at build time; falls back to chars*0.6 estimate when missing
+- [x] **window + gpu context** — `winit` + `wgpu` deps added. window created, wgpu surface/device/queue configured. render pass clears window with dark color on each frame. `window.rs` module.
 
 ### plan: webrender integration
-1. **window + gpu context** — add `winit` + `wgpu` (or `glutin`) to deps. create window, init wgpu surface/device.
 2. **webrender** — add to deps. init `webrender::Renderer` with wgpu backend.
 3. **display list bridge** — rewrite `paint::build_display_list` → webrender `Transaction`:
    - `FillRect` → `webrender::api::PushStackingContext` + `PushRect`
