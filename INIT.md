@@ -86,3 +86,4 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 4. **no new documentation files** unless explicitly asked (no readme, no docs/). exceptions: this file, agents.md
 5. **minimal diffs** — change only what is needed for the task
 6. **language** — instructions in russian are fine; code comments in english
+7. **never commit automatically** — i will tell you when to commit/push. do not commit on your own.
