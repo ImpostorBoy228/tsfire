@@ -10,6 +10,10 @@ pkg-config = "0.3"
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(freetype_avail)'] }
 
+[features]
+default = ["gpu"]
+gpu = ["dep:winit", "dep:wgpu", "dep:raw-window-handle", "dep:pollster", "dep:bytemuck"]
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["rustls-tls"] }
@@ -28,13 +32,14 @@ stylo_atoms = { git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867
 dom = { package = "stylo_dom", git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
 style_traits = { package = "stylo_traits", git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
 
-
 string_cache = "0.9"
 web_atoms = "0.2.4"
 url = "2"
 
-winit = "0.30.13"
-wgpu = "29.0.3"
-raw-window-handle = "0.6.2"
-pollster = "0.4"
-bytemuck = { version = "1", features = ["derive"] }
+winit = { version = "0.30.13", optional = true }
+wgpu = { version = "29.0.3", optional = true }
+raw-window-handle = { version = "0.6.2", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+
+minifb = "0.25"
