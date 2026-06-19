@@ -207,7 +207,8 @@ fn font_cache() -> Option<&'static FontHandle> {
         ];
         for path in &paths {
             if let Ok(data) = std::fs::read(path) {
-                if let Some(font) = FontHandle::load(&data, 16.0) {
+                let boxed = data.into_boxed_slice();
+                if let Some(font) = FontHandle::load(boxed, 16.0) {
                     return Some(font);
                 }
             }

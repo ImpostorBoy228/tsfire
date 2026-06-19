@@ -36,20 +36,21 @@ mod imp {
 
     pub struct FontHandle {
         inner: *mut c_void,
+        _data: Box<[u8]>,
     }
 
     unsafe impl Send for FontHandle {}
     unsafe impl Sync for FontHandle {}
 
     impl FontHandle {
-        pub fn load(data: &[u8], pixel_size: f32) -> Option<Self> {
+        pub fn load(data: Box<[u8]>, pixel_size: f32) -> Option<Self> {
             let inner = unsafe {
                 font_load(data.as_ptr(), data.len() as std::ffi::c_ulong, pixel_size)
             };
             if inner.is_null() {
                 None
             } else {
-                Some(FontHandle { inner })
+                Some(FontHandle { inner, _data: data })
             }
         }
 
@@ -129,7 +130,7 @@ mod imp {
     pub struct FontHandle;
 
     impl FontHandle {
-        pub fn load(_data: &[u8], _pixel_size: f32) -> Option<Self> {
+        pub fn load(_data: Box<[u8]>, _pixel_size: f32) -> Option<Self> {
             None
         }
 
@@ -153,8 +154,9 @@ mod tests {
 
     #[test]
     fn test_cock_measure() {
-        let font_data = include_bytes!("/usr/share/fonts/noto/NotoSans-Regular.ttf");
-        let font = FontHandle::load(font_data, 16.0).expect("font_load failed");
+        let font_data: &[u8] = include_bytes!("/usr/share/fonts/noto/NotoSans-Regular.ttf");
+        let boxed: Box<[u8]> = Box::from(font_data);
+        let font = FontHandle::load(boxed, 16.0).expect("font_load failed");
         let w = font.measure("Hello World");
         assert!(w > 0.0, "width should be > 0, got {}", w);
         let w2 = font.measure("Привет мир");
@@ -164,8 +166,9 @@ mod tests {
 
     #[test]
     fn test_fill_glyphs() {
-        let font_data = include_bytes!("/usr/share/fonts/noto/NotoSans-Regular.ttf");
-        let font = FontHandle::load(font_data, 16.0).expect("font_load failed");
+        let font_data: &[u8] = include_bytes!("/usr/share/fonts/noto/NotoSans-Regular.ttf");
+        let boxed: Box<[u8]> = Box::from(font_data);
+        let font = FontHandle::load(boxed, 16.0).expect("font_load failed");
         let (infos, bitmap) = font.fill_glyphs("Hi").expect("fill_glyphs failed");
         assert_eq!(infos.len(), 2, "should have 2 glyphs");
         assert!(infos[0].adv_x > 0.0);

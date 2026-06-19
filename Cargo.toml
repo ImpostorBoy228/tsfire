@@ -20,10 +20,6 @@ cssparser = "0.37.0"
 euclid = "0.22"
 app_units = "0.7.8"
 
-string_cache = "0.9"
-web_atoms = "0.2.4"
-url = "2"
-
 # Servo stylo workspace
 selectors = { git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
 servo_arc = { git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
@@ -31,3 +27,14 @@ style = { package = "stylo", git = "https://github.com/servo/stylo", rev = "49e9
 stylo_atoms = { git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
 dom = { package = "stylo_dom", git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
 style_traits = { package = "stylo_traits", git = "https://github.com/servo/stylo", rev = "49e912cf401a7f867d33d61baa2389bb3d6f73e0" }
+
+
+string_cache = "0.9"
+web_atoms = "0.2.4"
+url = "2"
+
+winit = "0.30.13"
+wgpu = "29.0.3"
+raw-window-handle = "0.6.2"
+pollster = "0.4"
+bytemuck = "1"

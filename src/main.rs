@@ -8,6 +8,7 @@ mod paint;
 mod stylo_integration;
 mod image_handler;
 mod font;
+mod window;
 
 use reqwest::Client;
 
@@ -23,38 +24,51 @@ async fn gget(client: &Client, url: &str) ->
     Ok(body)
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
-    let uabilder = network::UaBuild::new(BROWSER);
-    let ua = uabilder.build();
-    let client = Client::builder()
-        .user_agent(ua)
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
         .build()?;
 
-    let response = gget(&client, "https://example.com/").await?;
+    let dl = rt.block_on(async {
+        let uabilder = network::UaBuild::new(BROWSER);
+        let ua = uabilder.build();
+        let client = Client::builder()
+            .user_agent(ua)
+            .build()?;
 
-    let dom = parse::phtml(&response);
+        let response = gget(&client, "https://example.com/").await?;
+        let dom = parse::phtml(&response);
+        let css_rules = parse::collect_css(&dom);
+        let render_tree = render::build(&dom.document, &css_rules);
 
-    let css_rules = parse::collect_css(&dom);
+        use layout::LayoutEngine;
 
-    let render_tree = render::build(&dom.document, &css_rules);
+        let dl = if let Some(tree) = render_tree {
+            render::dump(&tree);
 
-    use layout::LayoutEngine;
+            println!("\n--- layout tree ---");
+            let layout_engine = layout::BlockLayout;
+            let layout_boxes = layout_engine.layout(&tree, layout::Size { width: 1024.0, height: 768.0 });
+            layout::dump_boxes(&layout_boxes);
 
-    if let Some(tree) = render_tree {
-        render::dump(&tree);
+            println!();
+            let dl = paint::build_display_list(&layout_boxes);
+            paint::dump_display_list(&dl);
+            dl
+        } else {
+            paint::DisplayList {
+                items: vec![],
+                text_arena: String::new(),
+                images: vec![],
+                content_size: layout::Size { width: 1024.0, height: 768.0 },
+            }
+        };
 
-        println!("\n--- layout tree ---");
-        let layout_engine = layout::BlockLayout;
-        let layout_boxes = layout_engine.layout(&tree, layout::Size { width: 1024.0, height: 768.0 });
-        layout::dump_boxes(&layout_boxes);
+        Ok::<_, Box<dyn std::error::Error>>(dl)
+    })?;
 
-        println!();
-        let dl = paint::build_display_list(&layout_boxes);
-        paint::dump_display_list(&dl);
-    }
-
+    drop(rt);
+    window::run(dl)?;
     Ok(())
 }
 
