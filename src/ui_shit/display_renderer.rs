@@ -3,9 +3,17 @@ use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 
+use crate::parsing;
 use crate::ui_shit::{layout, paint, paint::TextRange};
 
 // --- Vertex types ---
+
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct SolidVertex {
+    position: [f32; 2],
+    color: [f32; 4],
+}
 
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
@@ -87,13 +95,20 @@ pub struct DisplayRenderer {
 
 fn vertex_buffer_layout_solid<'a>() -> wgpu::VertexBufferLayout<'a> {
     wgpu::VertexBufferLayout {
-        array_stride: 8,
+        array_stride: std::mem::size_of::<SolidVertex>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &[wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Float32x2,
-            offset: 0,
-            shader_location: 0,
-        }],
+        attributes: &[
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 8,
+                shader_location: 1,
+            },
+        ],
     }
 }
 
@@ -316,13 +331,13 @@ impl DisplayRenderer {
                 label: Some("tsfire encoder"),
             });
 
-        let mut solid_vertices: Vec<[f32; 2]> = Vec::new();
+        let mut solid_vertices: Vec<SolidVertex> = Vec::new();
         let mut textured_vertices: Vec<TexturedVertex> = Vec::new();
 
         for cmd in &list.items {
             match cmd {
-                paint::DisplayCommand::FillRect(rect, _color) => {
-                    self.add_fill_rect(rect, &mut solid_vertices);
+                paint::DisplayCommand::FillRect(rect, color) => {
+                    self.add_fill_rect(rect, color, &mut solid_vertices);
                 }
                 paint::DisplayCommand::TextRun(rect, _color, font_size, _font_family, range) => {
                     self.add_text_run(list, rect, *font_size, range, &mut textured_vertices);
@@ -382,19 +397,26 @@ impl DisplayRenderer {
         encoder.finish()
     }
 
-    fn add_fill_rect(&self, rect: &layout::Rect, out: &mut Vec<[f32; 2]>) {
+    fn add_fill_rect(&self, rect: &layout::Rect, color: &parsing::Color, out: &mut Vec<SolidVertex>) {
         let ndc_left = -1.0 + 2.0 * rect.x / self.width;
         let ndc_right = -1.0 + 2.0 * (rect.x + rect.width) / self.width;
         let ndc_top = 1.0 - 2.0 * rect.y / self.height;
         let ndc_bottom = 1.0 - 2.0 * (rect.y + rect.height) / self.height;
 
-        out.push([ndc_left, ndc_top]);
-        out.push([ndc_left, ndc_bottom]);
-        out.push([ndc_right, ndc_bottom]);
+        let c = [
+            color.0 as f32 / 255.0,
+            color.1 as f32 / 255.0,
+            color.2 as f32 / 255.0,
+            color.3 as f32 / 255.0,
+        ];
 
-        out.push([ndc_right, ndc_bottom]);
-        out.push([ndc_right, ndc_top]);
-        out.push([ndc_left, ndc_top]);
+        out.push(SolidVertex { position: [ndc_left, ndc_top], color: c });
+        out.push(SolidVertex { position: [ndc_left, ndc_bottom], color: c });
+        out.push(SolidVertex { position: [ndc_right, ndc_bottom], color: c });
+
+        out.push(SolidVertex { position: [ndc_right, ndc_bottom], color: c });
+        out.push(SolidVertex { position: [ndc_right, ndc_top], color: c });
+        out.push(SolidVertex { position: [ndc_left, ndc_top], color: c });
     }
 
     fn add_text_run(
