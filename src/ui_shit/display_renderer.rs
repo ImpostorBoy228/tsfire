@@ -20,6 +20,7 @@ struct SolidVertex {
 struct TexturedVertex {
     position: [f32; 2],
     uv: [f32; 2],
+    color: [f32; 4],
 }
 
 // --- Glyph Atlas ---
@@ -33,11 +34,44 @@ struct GlyphUV {
 }
 
 #[derive(Debug)]
+struct AtlasAlloc {
+    cursor_x: u32,
+    cursor_y: u32,
+    row_height: u32,
+}
+
+impl AtlasAlloc {
+    fn new() -> Self {
+        Self { cursor_x: 1, cursor_y: 1, row_height: 0 }
+    }
+
+    fn place(&mut self, w: u32, h: u32, atlas_size: u32) -> Option<(u32, u32)> {
+        let gap = 1u32;
+        let ww = w + gap;
+        let hh = h + gap;
+        if self.cursor_x + ww > atlas_size {
+            self.cursor_x = 1;
+            self.cursor_y += self.row_height;
+            self.row_height = 0;
+        }
+        if self.cursor_y + hh > atlas_size {
+            return None;
+        }
+        let x = self.cursor_x;
+        let y = self.cursor_y;
+        self.cursor_x += ww;
+        self.row_height = self.row_height.max(hh);
+        Some((x, y))
+    }
+}
+
+#[derive(Debug)]
 struct GlyphAtlas {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     cache: HashMap<u32, GlyphUV>,
     atlas_size: u32,
+    alloc: AtlasAlloc,
 }
 
 impl GlyphAtlas {
@@ -64,6 +98,7 @@ impl GlyphAtlas {
             view,
             cache: HashMap::new(),
             atlas_size,
+            alloc: AtlasAlloc::new(),
         }
     }
 
@@ -71,8 +106,83 @@ impl GlyphAtlas {
         self.cache.get(&codepoint)
     }
 
-    fn add_glyph(&mut self, codepoint: u32, uv: GlyphUV) {
+    fn upload_glyph(
+        &mut self,
+        queue: &wgpu::Queue,
+        codepoint: u32,
+        bitmap: &[u8],
+        bm_width: i32,
+        bm_rows: i32,
+        bm_pitch: i32,
+        bm_offset: i32,
+    ) -> Option<GlyphUV> {
+        let w = bm_width as u32;
+        let h = bm_rows as u32;
+        let pitch = bm_pitch as u32;
+
+        let (atlas_x, atlas_y) = self.alloc.place(w, h, self.atlas_size)?;
+
+        let src_start = bm_offset as usize;
+        let src_len = (pitch * h) as usize;
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: atlas_x, y: atlas_y, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &bitmap[src_start..src_start + src_len],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(pitch),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+
+        let uv = GlyphUV {
+            x: atlas_x as f32 / self.atlas_size as f32,
+            y: atlas_y as f32 / self.atlas_size as f32,
+            width: w as f32 / self.atlas_size as f32,
+            height: h as f32 / self.atlas_size as f32,
+        };
         self.cache.insert(codepoint, uv);
+        Some(uv)
+    }
+}
+
+// --- Font cache ---
+
+struct FontCache {
+    data: Vec<u8>,
+    handles: HashMap<u32, crate::font::FontHandle>,
+}
+
+impl FontCache {
+    fn load() -> Option<Self> {
+        let paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+        ];
+        for p in &paths {
+            if let Ok(data) = std::fs::read(p) {
+                return Some(FontCache { data, handles: HashMap::new() });
+            }
+        }
+        None
+    }
+
+    fn get(&mut self, px: f32) -> Option<&crate::font::FontHandle> {
+        let key = px as u32;
+        if !self.handles.contains_key(&key) {
+            let b = self.data.clone().into_boxed_slice();
+            let handle = crate::font::FontHandle::load(b, px)?;
+            self.handles.insert(key, handle);
+        }
+        self.handles.get(&key)
     }
 }
 
@@ -86,11 +196,12 @@ pub struct DisplayRenderer {
 
     solid_pipeline: wgpu::RenderPipeline,
     textured_pipeline: wgpu::RenderPipeline,
+    textured_bgl: wgpu::BindGroupLayout,
     textured_bind_group: wgpu::BindGroup,
 
     glyph_atlas: Option<GlyphAtlas>,
-    dummy_texture: wgpu::Texture,
     dummy_sampler: wgpu::Sampler,
+    font_cache: Option<FontCache>,
 }
 
 fn vertex_buffer_layout_solid<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -127,6 +238,11 @@ fn vertex_buffer_layout_textured<'a>() -> wgpu::VertexBufferLayout<'a> {
                 offset: 8,
                 shader_location: 1,
             },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 16,
+                shader_location: 2,
+            },
         ],
     }
 }
@@ -144,13 +260,35 @@ impl DisplayRenderer {
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!("shaders/pipeline.wgsl"))),
         });
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pipeline_layout"),
-            bind_group_layouts: &[],
-            immediate_size: 0,
+        let solid_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("solid_bgl"),
+            entries: &[],
         });
 
-        // Dummy 1x1 white texture for fallback
+        let textured_bgl =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("textured_bgl"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        // Dummy 1x1 white texture for initial bind group
         let dummy_texture = device.create_texture_with_data(
             &queue,
             &wgpu::TextureDescriptor {
@@ -178,38 +316,9 @@ impl DisplayRenderer {
         });
         let dummy_tex_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let textured_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("textured_bgl"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let textured_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("textured_pipeline_layout"),
-            bind_group_layouts: &[Some(&textured_bind_group_layout)],
-            immediate_size: 0,
-        });
-
-        let textured_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("textured_bg"),
-            layout: &textured_bind_group_layout,
+        let dummy_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("dummy_bg"),
+            layout: &textured_bgl,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -220,6 +329,12 @@ impl DisplayRenderer {
                     resource: wgpu::BindingResource::TextureView(&dummy_tex_view),
                 },
             ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("solid_pipeline_layout"),
+            bind_group_layouts: &[Some(&solid_bgl)],
+            immediate_size: 0,
         });
 
         let solid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -260,6 +375,12 @@ impl DisplayRenderer {
             cache: None,
         });
 
+        let textured_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("textured_pipeline_layout"),
+            bind_group_layouts: &[Some(&textured_bgl)],
+            immediate_size: 0,
+        });
+
         let textured_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("textured_pipeline"),
             layout: Some(&textured_pipeline_layout),
@@ -274,7 +395,7 @@ impl DisplayRenderer {
                 entry_point: Some("fs_textured"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -298,6 +419,8 @@ impl DisplayRenderer {
             cache: None,
         });
 
+        let font_cache = FontCache::load();
+
         Self {
             device,
             queue,
@@ -305,16 +428,35 @@ impl DisplayRenderer {
             height: height as f32,
             solid_pipeline,
             textured_pipeline,
-            textured_bind_group,
+            textured_bgl,
+            textured_bind_group: dummy_bind_group,
             glyph_atlas: None,
-            dummy_texture,
             dummy_sampler,
+            font_cache,
         }
     }
 
     fn init_glyph_atlas(&mut self) {
         if self.glyph_atlas.is_none() {
-            self.glyph_atlas = Some(GlyphAtlas::new(&self.device, 512));
+            let atlas = GlyphAtlas::new(&self.device, 512);
+            self.glyph_atlas = Some(atlas);
+        }
+        // Recreate bind group with atlas texture
+        if let Some(atlas) = &self.glyph_atlas {
+            self.textured_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("atlas_bg"),
+                layout: &self.textured_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Sampler(&self.dummy_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&atlas.view),
+                    },
+                ],
+            });
         }
     }
 
@@ -323,8 +465,6 @@ impl DisplayRenderer {
         target: &wgpu::TextureView,
         list: &paint::DisplayList,
     ) -> wgpu::CommandBuffer {
-        self.init_glyph_atlas();
-
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -339,8 +479,8 @@ impl DisplayRenderer {
                 paint::DisplayCommand::FillRect(rect, color) => {
                     self.add_fill_rect(rect, color, &mut solid_vertices);
                 }
-                paint::DisplayCommand::TextRun(rect, _color, font_size, _font_family, range) => {
-                    self.add_text_run(list, rect, *font_size, range, &mut textured_vertices);
+                paint::DisplayCommand::TextRun(rect, color, font_size, font_family, range) => {
+                    self.add_text_run(list, rect, color, *font_size, *font_family, range, &mut textured_vertices);
                 }
                 _ => {}
             }
@@ -418,7 +558,6 @@ impl DisplayRenderer {
         out.push(SolidVertex { position: [ndc_left, ndc_top], color: c });
         out.push(SolidVertex { position: [ndc_left, ndc_bottom], color: c });
         out.push(SolidVertex { position: [ndc_right, ndc_bottom], color: c });
-
         out.push(SolidVertex { position: [ndc_right, ndc_bottom], color: c });
         out.push(SolidVertex { position: [ndc_right, ndc_top], color: c });
         out.push(SolidVertex { position: [ndc_left, ndc_top], color: c });
@@ -428,76 +567,80 @@ impl DisplayRenderer {
         &mut self,
         list: &paint::DisplayList,
         rect: &layout::Rect,
+        color: &parsing::Color,
         font_size: f32,
+        _font_family: u8,
         range: &TextRange,
         out: &mut Vec<TexturedVertex>,
     ) {
-        let text: String = list.text_arena[range.start as usize..][..range.len as usize]
-            .chars()
-            .collect();
+        let font_cache = match &mut self.font_cache {
+            Some(f) => f,
+            None => return,
+        };
+        let font = match font_cache.get(font_size) {
+            Some(f) => f,
+            None => return,
+        };
 
-        let char_w = font_size * 0.6;
+        let text = &list.text_arena[range.start as usize..][..range.len as usize];
+        let (glyphs, bitmap) = match font.fill_glyphs(text) {
+            Some(v) => v,
+            None => return,
+        };
 
-        let mut x = rect.x;
+        self.init_glyph_atlas();
+        let atlas = match &mut self.glyph_atlas {
+            Some(a) => a,
+            None => return,
+        };
 
-        for ch in text.chars() {
-            let codepoint = ch as u32;
+        let cr = color.0 as f32 / 255.0;
+        let cg = color.1 as f32 / 255.0;
+        let cb = color.2 as f32 / 255.0;
+        let ca = color.3 as f32 / 255.0;
+        let color_arr = [cr, cg, cb, ca];
 
-            let uv = if let Some(atlas) = &self.glyph_atlas {
-                if let Some(uv) = atlas.get_glyph(codepoint) {
-                    *uv
-                } else {
-                    let uv = GlyphUV {
-                        x: 0.0,
-                        y: 0.0,
-                        width: char_w / atlas.atlas_size as f32,
-                        height: font_size * 1.2 / atlas.atlas_size as f32,
-                    };
-                    if let Some(atlas) = &mut self.glyph_atlas {
-                        atlas.add_glyph(codepoint, uv);
+        let baseline_y = rect.y + rect.height * 0.8;
+        let mut cursor_x = rect.x;
+
+        for info in &glyphs {
+            cursor_x += info.ker_x;
+
+            let uv = match atlas.get_glyph(info.codepoint) {
+                Some(uv) => *uv,
+                None => match atlas.upload_glyph(
+                    &self.queue,
+                    info.codepoint,
+                    &bitmap,
+                    info.bm_width,
+                    info.bm_rows,
+                    info.bm_pitch,
+                    info.bm_offset,
+                ) {
+                    Some(uv) => uv,
+                    None => {
+                        cursor_x += info.adv_x;
+                        continue;
                     }
-                    uv
-                }
-            } else {
-                GlyphUV {
-                    x: 0.0,
-                    y: 0.0,
-                    width: char_w / 512.0,
-                    height: font_size * 1.2 / 512.0,
-                }
+                },
             };
 
-            let ndc_left = -1.0 + 2.0 * x / self.width;
-            let ndc_right = -1.0 + 2.0 * (x + char_w) / self.width;
-            let ndc_top = 1.0 - 2.0 * rect.y / self.height;
-            let ndc_bottom = 1.0 - 2.0 * (rect.y + font_size * 1.2) / self.height;
+            let gx = cursor_x + info.br_x;
+            let gy = baseline_y - info.br_y;
 
-            out.push(TexturedVertex {
-                position: [ndc_left, ndc_top],
-                uv: [uv.x, uv.y],
-            });
-            out.push(TexturedVertex {
-                position: [ndc_left, ndc_bottom],
-                uv: [uv.x, uv.y + uv.height],
-            });
-            out.push(TexturedVertex {
-                position: [ndc_right, ndc_bottom],
-                uv: [uv.x + uv.width, uv.y + uv.height],
-            });
-            out.push(TexturedVertex {
-                position: [ndc_right, ndc_bottom],
-                uv: [uv.x + uv.width, uv.y + uv.height],
-            });
-            out.push(TexturedVertex {
-                position: [ndc_right, ndc_top],
-                uv: [uv.x + uv.width, uv.y],
-            });
-            out.push(TexturedVertex {
-                position: [ndc_left, ndc_top],
-                uv: [uv.x, uv.y],
-            });
+            let ndc_left = -1.0 + 2.0 * gx / self.width;
+            let ndc_right = -1.0 + 2.0 * (gx + info.bm_width as f32) / self.width;
+            let ndc_top = 1.0 - 2.0 * gy / self.height;
+            let ndc_bottom = 1.0 - 2.0 * (gy + info.bm_rows as f32) / self.height;
 
-            x += char_w;
+            out.push(TexturedVertex { position: [ndc_left, ndc_top], uv: [uv.x, uv.y], color: color_arr });
+            out.push(TexturedVertex { position: [ndc_left, ndc_bottom], uv: [uv.x, uv.y + uv.height], color: color_arr });
+            out.push(TexturedVertex { position: [ndc_right, ndc_bottom], uv: [uv.x + uv.width, uv.y + uv.height], color: color_arr });
+            out.push(TexturedVertex { position: [ndc_right, ndc_bottom], uv: [uv.x + uv.width, uv.y + uv.height], color: color_arr });
+            out.push(TexturedVertex { position: [ndc_right, ndc_top], uv: [uv.x + uv.width, uv.y], color: color_arr });
+            out.push(TexturedVertex { position: [ndc_left, ndc_top], uv: [uv.x, uv.y], color: color_arr });
+
+            cursor_x += info.adv_x;
         }
     }
 
