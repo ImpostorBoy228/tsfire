@@ -80,7 +80,6 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 - **background-repeat/position** — tiling and offset for background images
 - **incremental re-style** — handle viewport-relative CSS units on resize
 - **relative z-index** — proper stacking context ordering
-- **cpu_renderer clip/opacity** — currently unimplemented
 
 ## ai code rules
 

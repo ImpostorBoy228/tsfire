@@ -1,7 +1,7 @@
 use crate::font::FontHandle;
 use crate::parsing::Color;
 use crate::ui_shit::layout;
-use crate::ui_shit::paint::{DecodedImage, DisplayCommand, DisplayList, TextRange};
+use crate::ui_shit::paint::{BorderStyle, DecodedImage, DisplayCommand, DisplayList, TextRange};
 
 fn argb(c: &Color) -> u32 {
     (c.3 as u32) << 24 | (c.0 as u32) << 16 | (c.1 as u32) << 8 | (c.2 as u32)
@@ -12,6 +12,8 @@ pub struct CpuRenderer {
     pub width: u32,
     pub height: u32,
     font: Option<FontHandle>,
+    clip_stack: Vec<layout::Rect>,
+    global_alpha: f32,
 }
 
 fn load_font() -> Option<FontHandle> {
@@ -38,7 +40,22 @@ impl CpuRenderer {
     pub fn new(width: u32, height: u32) -> Self {
         let buffer = vec![0xFFFFFFFF; (width * height) as usize];
         let font = load_font();
-        CpuRenderer { buffer, width, height, font }
+        CpuRenderer { buffer, width, height, font, clip_stack: Vec::new(), global_alpha: 1.0 }
+    }
+
+    fn clip_intersect(rect: &layout::Rect, clip_stack: &[layout::Rect]) -> Option<layout::Rect> {
+        if clip_stack.is_empty() {
+            return Some(*rect);
+        }
+        let clip = clip_stack.last().unwrap();
+        let x1 = rect.x.max(clip.x);
+        let y1 = rect.y.max(clip.y);
+        let x2 = (rect.x + rect.width).min(clip.x + clip.width);
+        let y2 = (rect.y + rect.height).min(clip.y + clip.height);
+        if x1 >= x2 || y1 >= y2 {
+            return None;
+        }
+        Some(layout::Rect { x: x1, y: y1, width: x2 - x1, height: y2 - y1 })
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -58,28 +75,49 @@ impl CpuRenderer {
 
     fn render_cmd(&mut self, cmd: &DisplayCommand, text_arena: &str, images: &[DecodedImage]) {
         match cmd {
-            DisplayCommand::FillRect(r, c) => self.fill_rect(r, c),
-            DisplayCommand::FillGradient(r, g) => self.fill_gradient(r, g),
+            DisplayCommand::FillRect(r, c) => self.fill_rect_clipped(r, c),
+            DisplayCommand::FillGradient(r, g) => self.fill_gradient_clipped(r, g),
             DisplayCommand::Border(rect, sides) => {
                 let r = *rect;
-                self.fill_rect(&layout::Rect { x: r.x, y: r.y, width: r.width, height: sides[0].width }, &sides[0].color);
-                self.fill_rect(&layout::Rect { x: r.x + r.width - sides[1].width, y: r.y, width: sides[1].width, height: r.height }, &sides[1].color);
-                self.fill_rect(&layout::Rect { x: r.x, y: r.y + r.height - sides[2].width, width: r.width, height: sides[2].width }, &sides[2].color);
-                self.fill_rect(&layout::Rect { x: r.x, y: r.y, width: sides[3].width, height: r.height }, &sides[3].color);
+                if sides[0].width > 0.0 && sides[0].style != BorderStyle::None {
+                    self.fill_rect_clipped(&layout::Rect { x: r.x, y: r.y, width: r.width, height: sides[0].width }, &sides[0].color);
+                }
+                if sides[1].width > 0.0 && sides[1].style != BorderStyle::None {
+                    self.fill_rect_clipped(&layout::Rect { x: r.x + r.width - sides[1].width, y: r.y, width: sides[1].width, height: r.height }, &sides[1].color);
+                }
+                if sides[2].width > 0.0 && sides[2].style != BorderStyle::None {
+                    self.fill_rect_clipped(&layout::Rect { x: r.x, y: r.y + r.height - sides[2].width, width: r.width, height: sides[2].width }, &sides[2].color);
+                }
+                if sides[3].width > 0.0 && sides[3].style != BorderStyle::None {
+                    self.fill_rect_clipped(&layout::Rect { x: r.x, y: r.y, width: sides[3].width, height: r.height }, &sides[3].color);
+                }
             }
             DisplayCommand::DrawBoxShadow(r, c, _ox, _oy, _bl) => {
-                let sc = Color(c.0, c.1, c.2, (c.3 as f32 * 0.5) as u8);
-                self.fill_rect(r, &sc);
+                let alpha = (c.3 as f32 * 0.5 * self.global_alpha).min(255.0) as u8;
+                let sc = Color(c.0, c.1, c.2, alpha);
+                self.fill_rect_clipped(r, &sc);
             }
             DisplayCommand::DrawImage(r, idx) => {
                 if let Some(img) = images.get(*idx as usize) {
-                    self.draw_image(r, img);
+                    self.draw_image_clipped(r, img);
                 }
             }
             DisplayCommand::TextRun(r, c, _fz, _ff, range) => {
-                self.text_run(r, c, range, text_arena);
+                let ca = Color(c.0, c.1, c.2, (c.3 as f32 * self.global_alpha).min(255.0) as u8);
+                self.text_run(r, &ca, range, text_arena);
             }
-            _ => {}
+            DisplayCommand::SetClip(rect) => {
+                self.clip_stack.push(*rect);
+            }
+            DisplayCommand::PopClip => {
+                self.clip_stack.pop();
+            }
+            DisplayCommand::SetOpacity(val) => {
+                self.global_alpha = *val;
+            }
+            DisplayCommand::PopOpacity => {
+                self.global_alpha = 1.0;
+            }
         }
     }
 
@@ -108,6 +146,12 @@ impl CpuRenderer {
                 let a = (from.3 as f32 * inv + to.3 as f32 * t) as u32;
                 self.buffer[row + x as usize] = (a.min(255) << 24) | (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
             }
+        }
+    }
+
+    fn fill_gradient_clipped(&mut self, rect: &layout::Rect, grad: &crate::ui_shit::paint::Gradient) {
+        if let Some(r) = Self::clip_intersect(rect, &self.clip_stack) {
+            self.fill_gradient(&r, grad);
         }
     }
 
@@ -147,6 +191,12 @@ impl CpuRenderer {
         }
     }
 
+    fn draw_image_clipped(&mut self, rect: &layout::Rect, img: &DecodedImage) {
+        if let Some(r) = Self::clip_intersect(rect, &self.clip_stack) {
+            self.draw_image(&r, img);
+        }
+    }
+
     fn fill_rect(&mut self, rect: &crate::ui_shit::layout::Rect, color: &Color) {
         let p = argb(color);
         let x0 = rect.x.max(0.0) as u32;
@@ -158,6 +208,12 @@ impl CpuRenderer {
             for x in x0..x1 {
                 self.buffer[row + x as usize] = p;
             }
+        }
+    }
+
+    fn fill_rect_clipped(&mut self, rect: &layout::Rect, color: &Color) {
+        if let Some(r) = Self::clip_intersect(rect, &self.clip_stack) {
+            self.fill_rect(&r, color);
         }
     }
 
@@ -206,6 +262,14 @@ impl CpuRenderer {
                     let sx = x0 + col;
                     if sx < 0 || sx as u32 >= self.width {
                         continue;
+                    }
+                    // clip check
+                    if let Some(cr) = self.clip_stack.last() {
+                        let px = sx as f32;
+                        let py = sy as f32;
+                        if px < cr.x || px >= cr.x + cr.width || py < cr.y || py >= cr.y + cr.height {
+                            continue;
+                        }
                     }
                     let cov = bitmap[(info.bm_offset as usize) + row as usize * pitch + col as usize] as u32;
                     if cov == 0 {
