@@ -31,6 +31,7 @@ struct Renderer {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     display_renderer: Option<display_renderer::DisplayRenderer>,
+    limits: wgpu::Limits,
 }
 
 impl Renderer {
@@ -59,6 +60,7 @@ impl Renderer {
             )
             .await?;
         let caps = surface.get_capabilities(&adapter);
+        let limits = adapter.limits();
         let format = caps
             .formats
             .iter()
@@ -67,6 +69,10 @@ impl Renderer {
             .unwrap_or(caps.formats[0]);
         let alpha_mode = caps.alpha_modes[0];
         let size = window.inner_size();
+        let size = PhysicalSize::new(
+            size.width.min(limits.max_texture_dimension_2d),
+            size.height.min(limits.max_texture_dimension_2d),
+        );
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
@@ -79,7 +85,7 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        Ok(Self { device, queue, surface, config, display_renderer: None })
+        Ok(Self { device, queue, surface, config, display_renderer: None, limits })
     }
 
     fn ensure_renderer(&mut self) {
@@ -149,11 +155,13 @@ impl Renderer {
 
     fn resize(&mut self, size: PhysicalSize<u32>) {
         if size.width > 0 && size.height > 0 {
-            self.config.width = size.width;
-            self.config.height = size.height;
+            let w = size.width.min(self.limits.max_texture_dimension_2d);
+            let h = size.height.min(self.limits.max_texture_dimension_2d);
+            self.config.width = w;
+            self.config.height = h;
             self.surface.configure(&self.device, &self.config);
             if let Some(renderer) = &mut self.display_renderer {
-                renderer.resize(size.width, size.height);
+                renderer.resize(w, h);
             }
         }
     }

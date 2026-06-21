@@ -296,7 +296,9 @@ pub fn dump_display_list(list: &DisplayList) {
                 println!("  {:4}. DrawImage  ({:>8.1},{:>4.1} {:>6.1}x{:<4.1}) img#{}",
                     i, r.x, r.y, r.width, r.height, idx),
             DisplayCommand::TextRun(r, c, fz, _ff, range) => {
-                let preview: String = list.text_arena[range.start as usize..][..range.len as usize].chars().take(40).collect();
+                let end = (range.start + range.len) as usize;
+                let text = if end <= list.text_arena.len() { &list.text_arena[range.start as usize..end] } else { "" };
+                let preview: String = text.chars().take(40).collect();
                 println!("  {:4}. TextRun    ({:>8.1},{:>4.1} {:>6.1}x{:<4.1}) fz{} color:#{:02x}{:02x}{:02x} '{}'",
                     i, r.x, r.y, r.width, r.height, *fz as u32, c.0, c.1, c.2, preview);
             }

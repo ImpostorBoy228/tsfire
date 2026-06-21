@@ -692,7 +692,8 @@ impl DisplayRenderer {
             None => return,
         };
 
-        let text = &list.text_arena[range.start as usize..][..range.len as usize];
+        let end = (range.start + range.len) as usize;
+        let text = if end <= list.text_arena.len() { &list.text_arena[range.start as usize..end] } else { return };
         let (glyphs, bitmap) = match font.fill_glyphs(text) {
             Some(v) => v,
             None => return,
