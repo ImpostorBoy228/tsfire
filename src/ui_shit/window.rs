@@ -60,7 +60,7 @@ impl Renderer {
             )
             .await?;
         let caps = surface.get_capabilities(&adapter);
-        let limits = adapter.limits();
+        let limits = device.limits();
         let format = caps
             .formats
             .iter()
