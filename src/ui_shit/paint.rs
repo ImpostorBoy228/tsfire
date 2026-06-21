@@ -185,7 +185,16 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
     for c in &zero_p { paint_box(c, items, text_arena, image_map); }
     for c in &pos_p { paint_box(c, items, text_arena, image_map); }
 
-    // 7. text
+    // 7. replaced elements (img)
+    if box_.tag == "img" {
+        if let Some(ref src) = box_.src {
+            if let Some(&img_idx) = image_map.get(src) {
+                items.push(DisplayCommand::DrawImage(box_.rect, img_idx));
+            }
+        }
+    }
+
+    // 8. text
     if box_.tag == "#text" && !box_.text.is_empty() {
         let start = text_arena.len() as u32;
         text_arena.push_str(&box_.text);
@@ -353,7 +362,7 @@ mod tests {
     fn make_layout(tag: &str, style: ComputedValues, children: Vec<LayoutBox>) -> LayoutBox {
         LayoutBox {
             tag: tag.into(), text: String::new(), style, rect: Rect { x: 0.0, y: 0.0, width: 100.0, height: 50.0 },
-            children, positioned_children: vec![], clip_rect: None,
+            children, positioned_children: vec![], clip_rect: None, src: None,
         }
     }
 
@@ -363,7 +372,7 @@ mod tests {
         LayoutBox {
             tag: "#text".into(), text: text.into(), style: s,
             rect: Rect { x: 10.0, y: 10.0, width: 80.0, height: 20.0 },
-            children: vec![], positioned_children: vec![], clip_rect: None,
+            children: vec![], positioned_children: vec![], clip_rect: None, src: None,
         }
     }
 

@@ -47,6 +47,7 @@ pub struct LayoutBox {
     pub children: Vec<LayoutBox>,
     pub positioned_children: Vec<LayoutBox>,
     pub clip_rect: Option<Rect>,
+    pub src: Option<String>,
 }
 
 impl LayoutBox {
@@ -59,6 +60,7 @@ impl LayoutBox {
             children: vec![],
             positioned_children: vec![],
             clip_rect: None,
+            src: None,
         }
     }
 }
@@ -228,6 +230,7 @@ fn layout_positioned(node: &RenderNode, _containing: &Rect, cb: &CbContext) -> L
     box_.children = children;
     box_.positioned_children = positioned;
     box_.clip_rect = clip;
+    box_.src = node.src.clone();
     box_
 }
 
@@ -314,7 +317,9 @@ fn layout_float(node: &RenderNode, containing: &Rect, cb: &CbContext, cursor: &m
     }
     floats.push(FloatBox { rect, float: node.style.float });
 
-    LayoutBox::new(node.tag.clone(), node.text.clone(), node.style.clone(), rect)
+    let mut box_ = LayoutBox::new(node.tag.clone(), node.text.clone(), node.style.clone(), rect);
+    box_.src = node.src.clone();
+    box_
 }
 
 // --- Block layout ---
@@ -438,6 +443,7 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
     box_.children = children;
     box_.positioned_children = positioned;
     box_.clip_rect = clip;
+    box_.src = node.src.clone();
     box_
 }
 
@@ -716,11 +722,11 @@ mod tests {
     use crate::parsing::*;
 
     fn make_render(tag: &str, style: ComputedValues, children: Vec<RenderNode>) -> RenderNode {
-        RenderNode { tag: tag.into(), text: String::new(), style, children }
+        RenderNode { tag: tag.into(), text: String::new(), style, children, src: None }
     }
 
     fn make_text(text: &str, style: ComputedValues) -> RenderNode {
-        RenderNode { tag: "#text".into(), text: text.into(), style, children: vec![] }
+        RenderNode { tag: "#text".into(), text: text.into(), style, children: vec![], src: None }
     }
 
     fn base_style() -> ComputedValues {

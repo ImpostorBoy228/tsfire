@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
 
-    let (render_tree, decoded_images, image_map) = rt.block_on(async {
+        let (render_tree, decoded_images, image_map) = rt.block_on(async {
         let uabilder = network::UaBuild::new(BROWSER);
         let ua = uabilder.build();
         let client = Client::builder()
@@ -61,6 +61,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let render_tree = parsing::tree::build(&dom.document, &css_rules);
 
+        // Collect <img src> URLs, fetch + decode
+        let mut image_map: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut decoded_images: Vec<ui_shit::paint::DecodedImage> = Vec::new();
+
+        fn collect_img_srcs(node: &parsing::RenderNode, urls: &mut Vec<String>) {
+            if node.tag == "img" {
+                if let Some(ref src) = node.src {
+                    if !src.is_empty() {
+                        urls.push(src.clone());
+                    }
+                }
+            }
+            for child in &node.children {
+                collect_img_srcs(child, urls);
+            }
+        }
+
+        if let Some(ref tree) = render_tree {
+            let mut img_urls = Vec::new();
+            collect_img_srcs(tree, &mut img_urls);
+            img_urls.sort();
+            img_urls.dedup();
+
+            for img_url in &img_urls {
+                let abs_url = resolve_url(&url, img_url);
+                if let Ok(img_bytes) = gget(&client, &abs_url).await {
+                    if let Ok(img) = image_handler::ImageData::decode(img_bytes.as_bytes()) {
+                        let rgba = img.pixels().to_vec();
+                        let idx = decoded_images.len() as u32;
+                        image_map.insert(img_url.clone(), idx);
+                        decoded_images.push(ui_shit::paint::DecodedImage { width: img.width(), height: img.height(), rgba });
+                    }
+                }
+            }
+        }
+
         use ui_shit::layout::LayoutEngine;
 
         if let Some(ref tree) = render_tree {
@@ -72,11 +108,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui_shit::layout::dump_boxes(&layout_boxes);
 
             println!();
-            let dl = ui_shit::paint::build_display_list(&layout_boxes, vec![], &std::collections::HashMap::new());
+            let dl = ui_shit::paint::build_display_list(&layout_boxes, vec![], &image_map);
             ui_shit::paint::dump_display_list(&dl);
         }
 
-        Ok::<_, Box<dyn std::error::Error>>((render_tree, vec![], std::collections::HashMap::new()))
+        Ok::<_, Box<dyn std::error::Error>>((render_tree, decoded_images, image_map))
     })?;
 
     drop(rt);

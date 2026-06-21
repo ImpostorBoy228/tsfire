@@ -9,6 +9,7 @@ pub struct RenderNode {
     pub text: String,
     pub style: ComputedValues,
     pub children: Vec<RenderNode>,
+    pub src: Option<String>,
 }
 
 pub fn build(node: &Handle, rules: &[CssRule]) -> Option<RenderNode> {
@@ -27,7 +28,7 @@ fn build_inner(node: &Handle, rules: &[CssRule], stylist: &style::stylist::Styli
             None
         }
 
-        NodeData::Element { name, .. } => {
+        NodeData::Element { name, attrs, .. } => {
             let tag = name.local.to_string();
 
             if tag == "script" || tag == "style" {
@@ -45,6 +46,12 @@ fn build_inner(node: &Handle, rules: &[CssRule], stylist: &style::stylist::Styli
                 }
             }
 
+            let src = if tag == "img" {
+                attrs.borrow().iter().find(|a| a.name.local.as_ref() == "src").map(|a| a.value.to_string())
+            } else {
+                None
+            };
+
             let mut children = Vec::new();
             for child in node.children.borrow().iter() {
                 if let Some(rc) = build_inner(child, rules, stylist, Some(&cv)) {
@@ -57,6 +64,7 @@ fn build_inner(node: &Handle, rules: &[CssRule], stylist: &style::stylist::Styli
                 text: String::new(),
                 style: cv,
                 children,
+                src,
             })
         }
 
@@ -73,6 +81,7 @@ fn build_inner(node: &Handle, rules: &[CssRule], stylist: &style::stylist::Styli
                 text,
                 style: cv,
                 children: vec![],
+                src: None,
             })
         }
 
