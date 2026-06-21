@@ -1,7 +1,7 @@
 use crate::font::FontHandle;
 use crate::parsing::Color;
 use crate::ui_shit::layout;
-use crate::ui_shit::paint::{DisplayCommand, DisplayList, TextRange};
+use crate::ui_shit::paint::{DecodedImage, DisplayCommand, DisplayList, TextRange};
 
 fn argb(c: &Color) -> u32 {
     (c.3 as u32) << 24 | (c.0 as u32) << 16 | (c.1 as u32) << 8 | (c.2 as u32)
@@ -52,17 +52,14 @@ impl CpuRenderer {
     pub fn render(&mut self, list: &DisplayList) {
         self.buffer.fill(0xFFFFFFFF);
         for cmd in &list.items {
-            self.render_cmd(cmd, &list.text_arena);
+            self.render_cmd(cmd, &list.text_arena, &list.decoded_images);
         }
     }
 
-    fn render_cmd(&mut self, cmd: &DisplayCommand, text_arena: &str) {
+    fn render_cmd(&mut self, cmd: &DisplayCommand, text_arena: &str, images: &[DecodedImage]) {
         match cmd {
             DisplayCommand::FillRect(r, c) => self.fill_rect(r, c),
-            DisplayCommand::FillGradient(r, g) => {
-                let c = Color((g.from.0 + g.to.0) / 2, (g.from.1 + g.to.1) / 2, (g.from.2 + g.to.2) / 2, 200);
-                self.fill_rect(r, &c);
-            }
+            DisplayCommand::FillGradient(r, g) => self.fill_gradient(r, g),
             DisplayCommand::Border(rect, sides) => {
                 let r = *rect;
                 self.fill_rect(&layout::Rect { x: r.x, y: r.y, width: r.width, height: sides[0].width }, &sides[0].color);
@@ -74,10 +71,79 @@ impl CpuRenderer {
                 let sc = Color(c.0, c.1, c.2, (c.3 as f32 * 0.5) as u8);
                 self.fill_rect(r, &sc);
             }
+            DisplayCommand::DrawImage(r, idx) => {
+                if let Some(img) = images.get(*idx as usize) {
+                    self.draw_image(r, img);
+                }
+            }
             DisplayCommand::TextRun(r, c, _fz, _ff, range) => {
                 self.text_run(r, c, range, text_arena);
             }
             _ => {}
+        }
+    }
+
+    fn fill_gradient(&mut self, rect: &layout::Rect, grad: &crate::ui_shit::paint::Gradient) {
+        let x0 = rect.x.max(0.0) as u32;
+        let y0 = rect.y.max(0.0) as u32;
+        let x1 = (rect.x + rect.width).min(self.width as f32) as u32;
+        let y1 = (rect.y + rect.height).min(self.height as f32) as u32;
+
+        let from = grad.from;
+        let to = grad.to;
+
+        for y in y0..y1 {
+            let row = (y * self.width) as usize;
+            for x in x0..x1 {
+                let t = if grad.vertical {
+                    if rect.height <= 0.0 { 0.0 } else { (y as f32 - rect.y) / rect.height }
+                } else {
+                    if rect.width <= 0.0 { 0.0 } else { (x as f32 - rect.x) / rect.width }
+                };
+                let t = t.clamp(0.0, 1.0);
+                let inv = 1.0 - t;
+                let r = (from.0 as f32 * inv + to.0 as f32 * t) as u32;
+                let g = (from.1 as f32 * inv + to.1 as f32 * t) as u32;
+                let b = (from.2 as f32 * inv + to.2 as f32 * t) as u32;
+                let a = (from.3 as f32 * inv + to.3 as f32 * t) as u32;
+                self.buffer[row + x as usize] = (a.min(255) << 24) | (r.min(255) << 16) | (g.min(255) << 8) | b.min(255);
+            }
+        }
+    }
+
+    fn draw_image(&mut self, rect: &layout::Rect, img: &DecodedImage) {
+        let dx0 = rect.x.max(0.0) as u32;
+        let dy0 = rect.y.max(0.0) as u32;
+        let dx1 = (rect.x + rect.width).min(self.width as f32) as u32;
+        let dy1 = (rect.y + rect.height).min(self.height as f32) as u32;
+
+        for dy in dy0..dy1 {
+            let row = (dy * self.width) as usize;
+            let src_y = ((dy as f32 - rect.y) / rect.height * img.height as f32) as u32;
+            let src_row = src_y.min(img.height - 1) as usize * img.width as usize * 4;
+
+            for dx in dx0..dx1 {
+                let src_x = ((dx as f32 - rect.x) / rect.width * img.width as f32) as u32;
+                let src_idx = src_row + src_x.min(img.width - 1) as usize * 4;
+                let r = img.rgba[src_idx] as u32;
+                let g = img.rgba[src_idx + 1] as u32;
+                let b = img.rgba[src_idx + 2] as u32;
+                let a = img.rgba[src_idx + 3] as u32;
+
+                if a == 255 {
+                    self.buffer[row + dx as usize] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+                } else if a > 0 {
+                    let dst = self.buffer[row + dx as usize];
+                    let inv = 255 - a;
+                    let dr = (dst >> 16) & 0xFF;
+                    let dg = (dst >> 8) & 0xFF;
+                    let db = dst & 0xFF;
+                    self.buffer[row + dx as usize] = (0xFF << 24)
+                        | (((r * a + dr * inv) / 255) << 16)
+                        | (((g * a + dg * inv) / 255) << 8)
+                        | ((b * a + db * inv) / 255);
+                }
+            }
         }
     }
 
