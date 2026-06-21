@@ -477,9 +477,10 @@ fn estimate_text_width(text: &str, font_size: f32) -> f32 {
 
 // --- Helpers ---
 
-pub fn resolve_length(length: &Length, _parent_width: f32) -> f32 {
+pub fn resolve_length(length: &Length, parent_width: f32) -> f32 {
     match length {
         Length::Px(v) => *v,
+        Length::Percent(p) => parent_width * p / 100.0,
         Length::Auto => 0.0,
     }
 }

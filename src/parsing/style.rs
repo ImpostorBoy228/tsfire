@@ -8,6 +8,7 @@ pub struct Color(pub u8, pub u8, pub u8, pub u8);
 #[derive(Clone, Debug, PartialEq)]
 pub enum Length {
     Px(f32),
+    Percent(f32),
     Auto,
 }
 
@@ -15,6 +16,22 @@ pub enum Length {
 pub enum Display {
     Inline,
     Block,
+    InlineBlock,
+    Flex,
+    InlineFlex,
+    Grid,
+    InlineGrid,
+    Table,
+    InlineTable,
+    TableRowGroup,
+    TableHeaderGroup,
+    TableFooterGroup,
+    TableRow,
+    TableColumnGroup,
+    TableColumn,
+    TableCell,
+    TableCaption,
+    ListItem,
     None,
 }
 
@@ -24,6 +41,7 @@ pub enum Position {
     Relative,
     Absolute,
     Fixed,
+    Sticky,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,6 +74,35 @@ pub enum Float {
     Right,
     InlineStart,
     InlineEnd,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WhiteSpace {
+    Normal,
+    Nowrap,
+    Pre,
+    PreWrap,
+    PreLine,
+    BreakSpaces,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BoxSizing {
+    ContentBox,
+    BorderBox,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Visibility {
+    Visible,
+    Hidden,
+    Collapse,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Direction {
+    Ltr,
+    Rtl,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -178,12 +225,26 @@ pub struct ComputedValues {
     // Background
     pub background_image: Vec<BackgroundImage>,
 
-    // Text
+    // Font & Text
+    pub line_height: f32,
+    pub font_family: String,
+    pub white_space: WhiteSpace,
+    pub direction: Direction,
     pub text_decoration_line: TextDecorationLine,
     pub text_decoration_color: Color,
     pub text_decoration_style: BorderStyle,
     pub text_align: TextAlign,
     pub vertical_align: VerticalAlign,
+
+    // Sizing
+    pub min_width: Length,
+    pub max_width: Length,
+    pub min_height: Length,
+    pub max_height: Length,
+    pub box_sizing: BoxSizing,
+
+    // Visibility
+    pub visibility: Visibility,
 
     // Outline
     pub outline_width: f32,
@@ -242,11 +303,23 @@ impl Default for ComputedValues {
 
             background_image: vec![],
 
+            line_height: 19.2,
+            font_family: String::from("sans-serif"),
+            white_space: WhiteSpace::Normal,
+            direction: Direction::Ltr,
             text_decoration_line: TextDecorationLine::none(),
             text_decoration_color: Color(0, 0, 0, 255),
             text_decoration_style: BorderStyle::Solid,
             text_align: TextAlign::Start,
             vertical_align: VerticalAlign::Baseline,
+
+            min_width: Length::Auto,
+            max_width: Length::Auto,
+            min_height: Length::Auto,
+            max_height: Length::Auto,
+            box_sizing: BoxSizing::ContentBox,
+
+            visibility: Visibility::Visible,
 
             outline_width: 0.0,
             outline_style: BorderStyle::None,
@@ -260,7 +333,12 @@ impl ComputedValues {
         let mut cv = ComputedValues::default();
         cv.color = parent.color.clone();
         cv.font_size = parent.font_size;
+        cv.line_height = parent.line_height;
+        cv.font_family = parent.font_family.clone();
+        cv.white_space = parent.white_space;
+        cv.direction = parent.direction;
         cv.text_align = parent.text_align;
+        cv.visibility = parent.visibility;
         cv
     }
 
@@ -499,11 +577,7 @@ fn parse_length(value: &str) -> Option<Length> {
         let v: f32 = pt.trim().parse().ok()?;
         Some(Length::Px(v * 1.33333))
     } else if let Some(val) = s.strip_suffix('%') {
-        if let Ok(v) = val.trim().parse::<f32>() {
-            if v == 0.0 { Some(Length::Px(0.0)) } else { Some(Length::Auto) }
-        } else {
-            None
-        }
+        val.trim().parse::<f32>().ok().map(Length::Percent)
     } else if let Ok(v) = s.parse::<f32>() {
         Some(Length::Px(v))
     } else {
@@ -543,6 +617,22 @@ fn parse_display(value: &str) -> Option<Display> {
     match value.trim() {
         "block" => Some(Display::Block),
         "inline" => Some(Display::Inline),
+        "inline-block" => Some(Display::InlineBlock),
+        "flex" => Some(Display::Flex),
+        "inline-flex" => Some(Display::InlineFlex),
+        "grid" => Some(Display::Grid),
+        "inline-grid" => Some(Display::InlineGrid),
+        "table" => Some(Display::Table),
+        "inline-table" => Some(Display::InlineTable),
+        "table-row-group" => Some(Display::TableRowGroup),
+        "table-header-group" => Some(Display::TableHeaderGroup),
+        "table-footer-group" => Some(Display::TableFooterGroup),
+        "table-row" => Some(Display::TableRow),
+        "table-column-group" => Some(Display::TableColumnGroup),
+        "table-column" => Some(Display::TableColumn),
+        "table-cell" => Some(Display::TableCell),
+        "table-caption" => Some(Display::TableCaption),
+        "list-item" => Some(Display::ListItem),
         "none" => Some(Display::None),
         _ => None,
     }
@@ -554,6 +644,7 @@ fn parse_position(value: &str) -> Option<Position> {
         "relative" => Some(Position::Relative),
         "absolute" => Some(Position::Absolute),
         "fixed" => Some(Position::Fixed),
+        "sticky" => Some(Position::Sticky),
         _ => None,
     }
 }

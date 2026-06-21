@@ -627,13 +627,28 @@ fn resolve_stylo_color_from_abs(color: &style::values::computed::Color) -> crate
 
 /// Convert Stylo's ComputedValues to our custom format
 pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::parsing::ComputedValues {
-    use crate::parsing::{ComputedValues as OurCV, Display, Length, Position, BoxShadow, TextDecorationLine, VerticalAlign};
+    use crate::parsing::{ComputedValues as OurCV, Display, Length, Position, BoxShadow, TextDecorationLine, VerticalAlign, WhiteSpace, BoxSizing, Visibility, Direction};
 
     let box_ = stylo.get_box();
 
     let display = match box_.display {
         style::values::computed::Display::None => Display::None,
         style::values::computed::Display::Inline => Display::Inline,
+        style::values::computed::Display::InlineBlock => Display::InlineBlock,
+        style::values::computed::Display::Flex => Display::Flex,
+        style::values::computed::Display::InlineFlex => Display::InlineFlex,
+        style::values::computed::Display::Grid => Display::Grid,
+        style::values::computed::Display::InlineGrid => Display::InlineGrid,
+        style::values::computed::Display::Table => Display::Table,
+        style::values::computed::Display::InlineTable => Display::InlineTable,
+        style::values::computed::Display::TableRowGroup => Display::TableRowGroup,
+        style::values::computed::Display::TableHeaderGroup => Display::TableHeaderGroup,
+        style::values::computed::Display::TableFooterGroup => Display::TableFooterGroup,
+        style::values::computed::Display::TableRow => Display::TableRow,
+        style::values::computed::Display::TableColumnGroup => Display::TableColumnGroup,
+        style::values::computed::Display::TableColumn => Display::TableColumn,
+        style::values::computed::Display::TableCell => Display::TableCell,
+        style::values::computed::Display::TableCaption => Display::TableCaption,
         _ => Display::Block,
     };
 
@@ -641,6 +656,7 @@ pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::parsing::
         style::values::computed::PositionProperty::Absolute => Position::Absolute,
         style::values::computed::PositionProperty::Fixed => Position::Fixed,
         style::values::computed::PositionProperty::Relative => Position::Relative,
+        style::values::computed::PositionProperty::Sticky => Position::Sticky,
         _ => Position::Static,
     };
 
@@ -823,6 +839,21 @@ pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::parsing::
         text_decoration_style,
         text_align,
         vertical_align,
+
+        // Font & Text (bridge added later)
+        line_height: font_size * 1.2,
+        font_family: String::from("sans-serif"),
+        white_space: WhiteSpace::Normal,
+        direction: Direction::Ltr,
+
+        // Sizing
+        min_width: Length::Auto,
+        max_width: Length::Auto,
+        min_height: Length::Auto,
+        max_height: Length::Auto,
+        box_sizing: BoxSizing::ContentBox,
+
+        visibility: Visibility::Visible,
 
         outline_width,
         outline_style,
