@@ -57,55 +57,58 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 - http fetch + html5ever dom → css collection → stylo css engine (all major properties bridged)
 - external `<link rel="stylesheet">` fetched and parsed
 - cli argument: `cargo run -- https://example.com`
-- block layout with absolute/fixed positioning, float left/right, overflow clip
-- auto margins, relative positioning offset
+- block/inline/inline-block layout with absolute/fixed/relative positioning, float left/right, overflow clip, auto margins
 - percentage lengths (`Length::Percent`)
-- all display types mapped from stylo (block, inline, inline-block, flex, grid, table, etc.)
+- baseline alignment + line wrapping for mixed text/inline-block content
 - flat DisplayList: FillRect, FillGradient, DrawImage, TextRun, Border, DrawBoxShadow, SetClip/PopClip, SetOpacity/PopOpacity
-- wgpu renderer with solid + textured pipelines (clip rect, opacity alpha, border 4-rect, box-shadow)
-- cpu renderer fallback (minifb)
+- wgpu renderer with solid + gradient + textured pipelines (clip rect, opacity alpha, border 4-rect, box-shadow multi-rect blur)
+- cpu renderer fallback (minifb) — panics on gradient/texture/image commands
 - image decoding via stb_image (png/jpeg/webp → rgba)
 - font decoding via freetype2 (ttf → glyph metrics + grayscale bitmap)
 - glyph atlas for wgpu text rendering (Nearest filter + pixel snapping → sharp text)
 - glyph metrics cache (freetype not called after 1st frame)
 - dynamic vertex buffers (no `create_buffer_init` per frame)
 - frame rate limiter (60 FPS via `ControlFlow::WaitUntil`)
-- 30 tests, all passing
+- viewport resize → re-layout + rebuild DisplayList
+- 32 tests, all passing
 
 ## TODO
 
 ### main goal: complete display list generation for full html+css (with stylo)
 
-1. **stylo bridge** — `stylo_integration.rs` — border, opacity, overflow, text-decoration, box-shadow, float, clear, outline — **all bridged**.
-   - missing: `background-image: url(...)` (only gradients), `background-repeat/position`, `vertical-align` (always Baseline)
+1. **stylo bridge** — border, opacity, overflow, text-decoration, box-shadow, float, clear, outline — **all bridged**.
+   - `background-image: url(...)` — **done** (plumbed through image_map)
+   - missing: `background-repeat/position`, `vertical-align` (always Baseline)
 
-2. **layout** — `layout.rs` — positioned (abs/fixed/rel), floats, overflow clip, auto margins — **done**.
-   - missing: inline-block / inline formatting with baseline alignment, proper box-sizing (content vs border), margin collapse
+2. **layout** — positioned (abs/fixed/rel), floats, overflow clip, auto margins, inline-block, baseline alignment — **done**.
+   - missing: margin collapse, `box-sizing` (content vs border), word-level line wrapping
 
-3. **paint** — `paint.rs` — FillGradient, Border, SetClip/PopClip, SetOpacity/PopOpacity, TextRun, DrawBoxShadow — **done**.
-   - missing: `DrawImage` from `<img>` tags, stacked / multiple background layers
+3. **paint** — FillGradient, Border, DrawImage, SetClip/PopClip, SetOpacity/PopOpacity, TextRun, DrawBoxShadow — **done**.
+   - missing: `DrawImage` from `<img>` tags (only CSS `background-image: url(...)` plumbed), stacked / multiple background layers
 
-4. **display renderer** — `display_renderer.rs`:
+4. **display renderer**:
    - solid fill pipeline (FillRect) ✓
-   - textured pipeline (TextRun via glyph atlas) ✓
+   - gradient pipeline (FillGradient via vertex-interpolated `t`) ✓
+   - textured pipeline (TextRun via glyph atlas, DrawImage via image textures) ✓
    - border (4 per-side rects) ✓
+   - box-shadow (8-layer multi-rect blur approximation) ✓
    - clip (vertex rect intersection) + opacity (alpha multiply) ✓
-   - **missing:** gradient pipeline (FillGradient falls back to gray FillRect)
-   - **missing:** DrawImage pipeline (ignored)
-   - **missing:** proper BoxShadow (rendered as semi-transparent rect, no blur)
+   - **missing:** cpu_renderer support for gradient/texture/image commands (panics)
 
-5. **full html page pipeline** — `main.rs`:
-   - fetch → parse → stylo → render tree → layout → display list → render ✓
-   - display list dump with all command types ✓
-   - external `<link rel="stylesheet">` ✓
-   - **missing:** incremental re-style / re-layout on viewport resize
+5. **full html page pipeline** — fetch → parse → stylo → render tree → layout → display list → render — **done**.
+   - re-layout + rebuild DisplayList on viewport resize ✓
+   - **missing:** incremental re-style (viewport-relative CSS units)
 
-6. **performance** (not in original TODO):
-   - frame rate limiter (60 FPS via `ControlFlow::WaitUntil`) ✓
-   - dynamic vertex buffers (no GPU buffer alloc per frame) ✓
-   - glyph metrics cache (freetype skipped after 1st frame) ✓
-   - nearest-neighbor filter + pixel snapping for sharp text ✓
+6. **performance** — frame rate limiter, dynamic vertex buffers, glyph metrics cache, nearest+snap — **done**.
 
+### planned stages (in order)
+
+- **word-level line wrapping** — split text at word boundaries for proper line breaking
+- **`<img>` tag fetch** — download + decode images from `<img src="...">` DOM attributes
+- **cpu_renderer** — gradient / texture / image command support (currently panics)
+- **margin collapse** — vertical margin collapsing between block elements
+- **background-repeat/position** — tiling and offset for background images
+- **relative z-index** — proper stacking context ordering
 
 ## ai code rules
 
