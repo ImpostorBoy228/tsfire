@@ -279,7 +279,11 @@ fn layout_float(node: &RenderNode, containing: &Rect, cb: &CbContext, cursor: &m
     let box_h = if h > 0.0 { h } else { content_h + p_t + p_b };
     cursor.y = float_y + box_h + m_b;
 
-    let rect = Rect { x: float_x, y: float_y, width: float_w, height: box_h };
+    let mut rect = Rect { x: float_x, y: float_y, width: float_w, height: box_h };
+    if node.style.position == Position::Relative {
+        rect.x += resolve_length(&node.style.left, containing.width) - resolve_length(&node.style.right, containing.width);
+        rect.y += resolve_length(&node.style.top, containing.width) - resolve_length(&node.style.bottom, containing.width);
+    }
     floats.push(FloatBox { rect, float: node.style.float });
 
     LayoutBox::new(node.tag.clone(), node.text.clone(), node.style.clone(), rect)
@@ -289,9 +293,9 @@ fn layout_float(node: &RenderNode, containing: &Rect, cb: &CbContext, cursor: &m
 
 fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &mut Vec2, floats: &mut Vec<FloatBox>) -> LayoutBox {
     let m_t = resolve_length(&node.style.margin_top, containing.width);
-    let m_r = resolve_length(&node.style.margin_right, containing.width);
+    let mut m_r = resolve_length(&node.style.margin_right, containing.width);
     let m_b = resolve_length(&node.style.margin_bottom, containing.width);
-    let m_l = resolve_length(&node.style.margin_left, containing.width);
+    let mut m_l = resolve_length(&node.style.margin_left, containing.width);
 
     let p_t = resolve_length(&node.style.padding_top, containing.width);
     let p_r = resolve_length(&node.style.padding_right, containing.width);
@@ -301,7 +305,27 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
     let w = resolve_length(&node.style.width, containing.width);
     let h = resolve_length(&node.style.height, containing.width);
 
-    let content_w = containing.width - m_l - m_r;
+    // auto margins: distribute surplus space
+    let avail = containing.width;
+    if node.style.margin_left == crate::parsing::Length::Auto && node.style.margin_right == crate::parsing::Length::Auto {
+        if w > 0.0 && w < avail {
+            let surplus = avail - w - p_l - p_r;
+            if surplus > 0.0 {
+                m_l = surplus / 2.0;
+                m_r = surplus / 2.0;
+            }
+        }
+    } else if node.style.margin_left == crate::parsing::Length::Auto {
+        if w > 0.0 {
+            m_l = (avail - w - p_l - p_r - m_r).max(0.0);
+        }
+    } else if node.style.margin_right == crate::parsing::Length::Auto {
+        if w > 0.0 {
+            m_r = (avail - w - p_l - p_r - m_l).max(0.0);
+        }
+    }
+
+    let content_w = avail - m_l - m_r;
     let inner_w = if w > 0.0 { w - p_l - p_r } else { content_w - p_l - p_r };
 
     let x = containing.x + m_l;
@@ -364,11 +388,17 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
         None
     };
 
+    let mut rect = Rect { x, y, width: content_w, height: box_h };
+    if node.style.position == Position::Relative {
+        rect.x += resolve_length(&node.style.left, avail) - resolve_length(&node.style.right, avail);
+        rect.y += resolve_length(&node.style.top, avail) - resolve_length(&node.style.bottom, avail);
+    }
+
     let mut box_ = LayoutBox::new(
         node.tag.clone(),
         node.text.clone(),
         node.style.clone(),
-        Rect { x, y, width: content_w, height: box_h },
+        rect,
     );
     box_.children = children;
     box_.positioned_children = positioned;
