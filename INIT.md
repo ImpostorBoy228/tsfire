@@ -74,40 +74,12 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 
 ## TODO
 
-### main goal: complete display list generation for full html+css (with stylo)
-
-1. **stylo bridge** — border, opacity, overflow, text-decoration, box-shadow, float, clear, outline — **all bridged**.
-   - `background-image: url(...)` — **done** (plumbed through image_map)
-   - missing: `background-repeat/position`, `vertical-align` (always Baseline)
-
-2. **layout** — positioned (abs/fixed/rel), floats, overflow clip, auto margins, inline-block, baseline alignment — **done**.
-   - missing: margin collapse, `box-sizing` (content vs border), word-level line wrapping
-
-3. **paint** — FillGradient, Border, DrawImage, SetClip/PopClip, SetOpacity/PopOpacity, TextRun, DrawBoxShadow — **done**.
-   - missing: `DrawImage` from `<img>` tags (only CSS `background-image: url(...)` plumbed), stacked / multiple background layers
-
-4. **display renderer**:
-   - solid fill pipeline (FillRect) ✓
-   - gradient pipeline (FillGradient via vertex-interpolated `t`) ✓
-   - textured pipeline (TextRun via glyph atlas, DrawImage via image textures) ✓
-   - border (4 per-side rects) ✓
-   - box-shadow (8-layer multi-rect blur approximation) ✓
-   - clip (vertex rect intersection) + opacity (alpha multiply) ✓
-   - **missing:** cpu_renderer support for gradient/texture/image commands (panics)
-
-5. **full html page pipeline** — fetch → parse → stylo → render tree → layout → display list → render — **done**.
-   - re-layout + rebuild DisplayList on viewport resize ✓
-   - **missing:** incremental re-style (viewport-relative CSS units)
-
-6. **performance** — frame rate limiter, dynamic vertex buffers, glyph metrics cache, nearest+snap — **done**.
-
-### planned stages (in order)
-
 - **word-level line wrapping** — split text at word boundaries for proper line breaking
 - **`<img>` tag fetch** — download + decode images from `<img src="...">` DOM attributes
 - **cpu_renderer** — gradient / texture / image command support (currently panics)
 - **margin collapse** — vertical margin collapsing between block elements
 - **background-repeat/position** — tiling and offset for background images
+- **incremental re-style** — handle viewport-relative CSS units on resize
 - **relative z-index** — proper stacking context ordering
 
 ## ai code rules
