@@ -23,6 +23,14 @@ struct TexturedVertex {
     color: [f32; 4],
 }
 
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct GradientVert {
+    pos_t: [f32; 4],
+    from_rgba: [f32; 4],
+    to_rgba: [f32; 4],
+}
+
 // --- Glyph Atlas ---
 
 #[derive(Debug, Clone, Copy)]
@@ -210,6 +218,7 @@ pub struct DisplayRenderer {
     height: f32,
 
     solid_pipeline: wgpu::RenderPipeline,
+    gradient_pipeline: wgpu::RenderPipeline,
     textured_pipeline: wgpu::RenderPipeline,
     textured_bgl: wgpu::BindGroupLayout,
     textured_bind_group: wgpu::BindGroup,
@@ -226,6 +235,8 @@ pub struct DisplayRenderer {
     solid_vb_capacity: u64,
     textured_vb: wgpu::Buffer,
     textured_vb_capacity: u64,
+    gradient_vb: wgpu::Buffer,
+    gradient_vb_capacity: u64,
 }
 
 fn vertex_buffer_layout_solid<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -242,6 +253,30 @@ fn vertex_buffer_layout_solid<'a>() -> wgpu::VertexBufferLayout<'a> {
                 format: wgpu::VertexFormat::Float32x4,
                 offset: 8,
                 shader_location: 1,
+            },
+        ],
+    }
+}
+
+fn vertex_buffer_layout_gradient<'a>() -> wgpu::VertexBufferLayout<'a> {
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<GradientVert>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 16,
+                shader_location: 1,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 32,
+                shader_location: 2,
             },
         ],
     }
@@ -404,6 +439,56 @@ impl DisplayRenderer {
             cache: None,
         });
 
+        let gradient_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("gradient_bgl"),
+            entries: &[],
+        });
+
+        let gradient_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("gradient_pipeline_layout"),
+                bind_group_layouts: &[Some(&gradient_bgl)],
+                immediate_size: 0,
+            });
+
+        let gradient_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("gradient_pipeline"),
+            layout: Some(&gradient_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_gradient"),
+                buffers: &[vertex_buffer_layout_gradient()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_gradient"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+                unclipped_depth: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview_mask: None,
+            cache: None,
+        });
+
         let textured_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("textured_pipeline_layout"),
@@ -465,6 +550,12 @@ impl DisplayRenderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let gradient_vb = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gradient_vb"),
+            size: initial_vb_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Self {
             device,
@@ -472,6 +563,7 @@ impl DisplayRenderer {
             width: width as f32,
             height: height as f32,
             solid_pipeline,
+            gradient_pipeline,
             textured_pipeline,
             textured_bgl,
             textured_bind_group: dummy_bind_group,
@@ -485,6 +577,8 @@ impl DisplayRenderer {
             solid_vb_capacity: initial_vb_size,
             textured_vb,
             textured_vb_capacity: initial_vb_size,
+            gradient_vb,
+            gradient_vb_capacity: initial_vb_size,
         }
     }
 
@@ -524,6 +618,7 @@ impl DisplayRenderer {
             });
 
         let mut solid_vertices: Vec<SolidVertex> = Vec::new();
+        let mut gradient_vertices: Vec<GradientVert> = Vec::new();
         let mut textured_vertices: Vec<TexturedVertex> = Vec::new();
 
         for cmd in &list.items {
@@ -531,12 +626,8 @@ impl DisplayRenderer {
                 paint::DisplayCommand::FillRect(rect, color) => {
                     self.add_fill_rect(rect, color, &mut solid_vertices);
                 }
-                paint::DisplayCommand::FillGradient(rect, _) => {
-                    self.add_fill_rect(
-                        rect,
-                        &crate::parsing::Color(200, 200, 200, 200),
-                        &mut solid_vertices,
-                    );
+                paint::DisplayCommand::FillGradient(rect, grad) => {
+                    self.add_fill_gradient(rect, grad, &mut gradient_vertices);
                 }
                 paint::DisplayCommand::Border(rect, sides) => {
                     let r = *rect;
@@ -661,6 +752,23 @@ impl DisplayRenderer {
                 bytemuck::cast_slice(&textured_vertices),
             );
         }
+        if !gradient_vertices.is_empty() {
+            let needed = (gradient_vertices.len() * std::mem::size_of::<GradientVert>()) as u64;
+            if needed > self.gradient_vb_capacity {
+                self.gradient_vb_capacity = (needed as f64 * 1.5) as u64;
+                self.gradient_vb = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("gradient_vb"),
+                    size: self.gradient_vb_capacity,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            self.queue.write_buffer(
+                &self.gradient_vb,
+                0,
+                bytemuck::cast_slice(&gradient_vertices),
+            );
+        }
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -689,6 +797,12 @@ impl DisplayRenderer {
                 pass.set_pipeline(&self.solid_pipeline);
                 pass.set_vertex_buffer(0, self.solid_vb.slice(..));
                 pass.draw(0..solid_vertices.len() as u32, 0..1);
+            }
+
+            if !gradient_vertices.is_empty() {
+                pass.set_pipeline(&self.gradient_pipeline);
+                pass.set_vertex_buffer(0, self.gradient_vb.slice(..));
+                pass.draw(0..gradient_vertices.len() as u32, 0..1);
             }
 
             if !textured_vertices.is_empty() {
@@ -764,6 +878,54 @@ impl DisplayRenderer {
             position: [ndc_left, ndc_top],
             color: c,
         });
+    }
+
+    fn add_fill_gradient(
+        &self,
+        rect: &layout::Rect,
+        gradient: &paint::Gradient,
+        out: &mut Vec<GradientVert>,
+    ) {
+        let r = match self.clip_rect {
+            Some(cr) => {
+                let x = rect.x.max(cr.x);
+                let y = rect.y.max(cr.y);
+                let right = (rect.x + rect.width).min(cr.x + cr.width);
+                let bottom = (rect.y + rect.height).min(cr.y + cr.height);
+                if x >= right || y >= bottom { return; }
+                layout::Rect { x, y, width: right - x, height: bottom - y }
+            }
+            None => *rect,
+        };
+
+        let ndc_left = -1.0 + 2.0 * r.x / self.width;
+        let ndc_right = -1.0 + 2.0 * (r.x + r.width) / self.width;
+        let ndc_top = 1.0 - 2.0 * r.y / self.height;
+        let ndc_bottom = 1.0 - 2.0 * (r.y + r.height) / self.height;
+
+        let from = [
+            gradient.from.0 as f32 / 255.0,
+            gradient.from.1 as f32 / 255.0,
+            gradient.from.2 as f32 / 255.0,
+            gradient.from.3 as f32 / 255.0 * self.global_alpha,
+        ];
+        let to = [
+            gradient.to.0 as f32 / 255.0,
+            gradient.to.1 as f32 / 255.0,
+            gradient.to.2 as f32 / 255.0,
+            gradient.to.3 as f32 / 255.0 * self.global_alpha,
+        ];
+
+        let (t_top, t_bottom) = if gradient.vertical { (0.0, 1.0) } else { (0.0, 0.0) };
+
+        // triangle 1
+        out.push(GradientVert { pos_t: [ndc_left, ndc_top, t_top, 0.0], from_rgba: from, to_rgba: to });
+        out.push(GradientVert { pos_t: [ndc_left, ndc_bottom, t_bottom, 0.0], from_rgba: from, to_rgba: to });
+        out.push(GradientVert { pos_t: [ndc_right, ndc_bottom, t_bottom, 0.0], from_rgba: from, to_rgba: to });
+        // triangle 2
+        out.push(GradientVert { pos_t: [ndc_right, ndc_bottom, t_bottom, 0.0], from_rgba: from, to_rgba: to });
+        out.push(GradientVert { pos_t: [ndc_right, ndc_top, t_top, 0.0], from_rgba: from, to_rgba: to });
+        out.push(GradientVert { pos_t: [ndc_left, ndc_top, t_top, 0.0], from_rgba: from, to_rgba: to });
     }
 
     fn add_text_run(

@@ -51,3 +51,29 @@ fn fs_textured(
     let glyph = textureSample(tex, tex_sampler, uv).r;
     return vec4<f32>(color.rgb, color.a * glyph);
 }
+
+struct GradOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) pos_t: vec4<f32>,
+    @location(1) from_rgba: vec4<f32>,
+    @location(2) to_rgba: vec4<f32>,
+};
+
+@vertex
+fn vs_gradient(
+    @location(0) pos_t: vec4<f32>,
+    @location(1) from_rgba: vec4<f32>,
+    @location(2) to_rgba: vec4<f32>,
+) -> GradOutput {
+    var output: GradOutput;
+    output.clip_position = vec4<f32>(pos_t.xy, 0.0, 1.0);
+    output.pos_t = pos_t;
+    output.from_rgba = from_rgba;
+    output.to_rgba = to_rgba;
+    return output;
+}
+
+@fragment
+fn fs_gradient(vin: GradOutput) -> @location(0) vec4<f32> {
+    return mix(vin.from_rgba, vin.to_rgba, vin.pos_t.z);
+}
