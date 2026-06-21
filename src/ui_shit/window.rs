@@ -230,6 +230,7 @@ impl ApplicationHandler for App {
             _window: win,
             renderer,
         });
+        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now()));
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -266,11 +267,10 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(state) = &self.state {
+        if self.state.is_some() {
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_secs_f64(1.0 / 60.0),
             ));
-            state._window.request_redraw();
         }
     }
 }
