@@ -702,14 +702,21 @@ impl DisplayRenderer {
                         );
                     }
                 }
-                paint::DisplayCommand::DrawBoxShadow(rect, color, _ox, _oy, _blur) => {
-                    let shadow_color = crate::parsing::Color(
-                        color.0,
-                        color.1,
-                        color.2,
-                        (color.3 as f32 * 0.5) as u8,
-                    );
-                    self.add_fill_rect(rect, &shadow_color, &mut solid_vertices);
+                paint::DisplayCommand::DrawBoxShadow(rect, color, ox, oy, blur) => {
+                    let samples = if *blur < 1.0 { 1 } else { 8 };
+                    for i in 0..samples {
+                        let t = i as f32 / samples as f32;
+                        let alpha = (color.3 as f32 / 255.0) * (1.0 - t) * self.global_alpha;
+                        let spread = *blur * t / samples as f32;
+                        let r = layout::Rect {
+                            x: rect.x + *ox - spread,
+                            y: rect.y + *oy - spread,
+                            width: rect.width + 2.0 * spread,
+                            height: rect.height + 2.0 * spread,
+                        };
+                        let c = crate::parsing::Color(color.0, color.1, color.2, (alpha * 255.0) as u8);
+                        self.add_fill_rect(&r, &c, &mut solid_vertices);
+                    }
                 }
                 paint::DisplayCommand::TextRun(rect, color, font_size, font_family, range) => {
                     self.add_text_run(
