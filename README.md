@@ -2,6 +2,7 @@
 
 experimental low-ram browser engine in rust.
 
+![test](test.png)
 fetches pages → parses html/css (via stylo) → builds render tree →
 computes layout → produces display list → (planned) renders via webrender.
 
@@ -68,5 +69,3 @@ freetype2 is auto-detected. if missing, font measurement falls back to `chars*0.
 
 tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors,
 euclid, app_units, string_cache, stylo (servo), freetype2 (optional)
-
-
