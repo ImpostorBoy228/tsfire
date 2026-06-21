@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
+use wgpu::util::DeviceExt;
 
 use crate::parsing;
 use crate::ui_shit::{layout, paint, paint::TextRange};
@@ -42,7 +42,11 @@ struct AtlasAlloc {
 
 impl AtlasAlloc {
     fn new() -> Self {
-        Self { cursor_x: 1, cursor_y: 1, row_height: 0 }
+        Self {
+            cursor_x: 1,
+            cursor_y: 1,
+            row_height: 0,
+        }
     }
 
     fn place(&mut self, w: u32, h: u32, atlas_size: u32) -> Option<(u32, u32)> {
@@ -128,7 +132,11 @@ impl GlyphAtlas {
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x: atlas_x, y: atlas_y, z: 0 },
+                origin: wgpu::Origin3d {
+                    x: atlas_x,
+                    y: atlas_y,
+                    z: 0,
+                },
                 aspect: wgpu::TextureAspect::All,
             },
             &bitmap[src_start..src_start + src_len],
@@ -137,7 +145,11 @@ impl GlyphAtlas {
                 bytes_per_row: Some(pitch),
                 rows_per_image: Some(h),
             },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
 
         let uv = GlyphUV {
@@ -161,15 +173,18 @@ struct FontCache {
 impl FontCache {
     fn load() -> Option<Self> {
         let paths = [
+            crate::font::DEFAULT_FONT_PATH,
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
             "/usr/share/fonts/TTF/DejaVuSans.ttf",
             "/System/Library/Fonts/Helvetica.ttc",
         ];
         for p in &paths {
             if let Ok(data) = std::fs::read(p) {
-                return Some(FontCache { data, handles: HashMap::new() });
+                return Some(FontCache {
+                    data,
+                    handles: HashMap::new(),
+                });
             }
         }
         None
@@ -257,7 +272,9 @@ impl DisplayRenderer {
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tsfire_shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!("shaders/pipeline.wgsl"))),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                "shaders/pipeline.wgsl"
+            ))),
         });
 
         let solid_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -265,35 +282,38 @@ impl DisplayRenderer {
             entries: &[],
         });
 
-        let textured_bgl =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("textured_bgl"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
+        let textured_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("textured_bgl"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
 
         // Dummy 1x1 white texture for initial bind group
         let dummy_texture = device.create_texture_with_data(
             &queue,
             &wgpu::TextureDescriptor {
                 label: Some("dummy_texture"),
-                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -375,11 +395,12 @@ impl DisplayRenderer {
             cache: None,
         });
 
-        let textured_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("textured_pipeline_layout"),
-            bind_group_layouts: &[Some(&textured_bgl)],
-            immediate_size: 0,
-        });
+        let textured_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("textured_pipeline_layout"),
+                bind_group_layouts: &[Some(&textured_bgl)],
+                immediate_size: 0,
+            });
 
         let textured_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("textured_pipeline"),
@@ -480,7 +501,15 @@ impl DisplayRenderer {
                     self.add_fill_rect(rect, color, &mut solid_vertices);
                 }
                 paint::DisplayCommand::TextRun(rect, color, font_size, font_family, range) => {
-                    self.add_text_run(list, rect, color, *font_size, *font_family, range, &mut textured_vertices);
+                    self.add_text_run(
+                        list,
+                        rect,
+                        color,
+                        *font_size,
+                        *font_family,
+                        range,
+                        &mut textured_vertices,
+                    );
                 }
                 _ => {}
             }
@@ -542,7 +571,12 @@ impl DisplayRenderer {
         encoder.finish()
     }
 
-    fn add_fill_rect(&self, rect: &layout::Rect, color: &parsing::Color, out: &mut Vec<SolidVertex>) {
+    fn add_fill_rect(
+        &self,
+        rect: &layout::Rect,
+        color: &parsing::Color,
+        out: &mut Vec<SolidVertex>,
+    ) {
         let ndc_left = -1.0 + 2.0 * rect.x / self.width;
         let ndc_right = -1.0 + 2.0 * (rect.x + rect.width) / self.width;
         let ndc_top = 1.0 - 2.0 * rect.y / self.height;
@@ -555,12 +589,30 @@ impl DisplayRenderer {
             color.3 as f32 / 255.0,
         ];
 
-        out.push(SolidVertex { position: [ndc_left, ndc_top], color: c });
-        out.push(SolidVertex { position: [ndc_left, ndc_bottom], color: c });
-        out.push(SolidVertex { position: [ndc_right, ndc_bottom], color: c });
-        out.push(SolidVertex { position: [ndc_right, ndc_bottom], color: c });
-        out.push(SolidVertex { position: [ndc_right, ndc_top], color: c });
-        out.push(SolidVertex { position: [ndc_left, ndc_top], color: c });
+        out.push(SolidVertex {
+            position: [ndc_left, ndc_top],
+            color: c,
+        });
+        out.push(SolidVertex {
+            position: [ndc_left, ndc_bottom],
+            color: c,
+        });
+        out.push(SolidVertex {
+            position: [ndc_right, ndc_bottom],
+            color: c,
+        });
+        out.push(SolidVertex {
+            position: [ndc_right, ndc_bottom],
+            color: c,
+        });
+        out.push(SolidVertex {
+            position: [ndc_right, ndc_top],
+            color: c,
+        });
+        out.push(SolidVertex {
+            position: [ndc_left, ndc_top],
+            color: c,
+        });
     }
 
     fn add_text_run(
@@ -633,16 +685,42 @@ impl DisplayRenderer {
             let ndc_top = 1.0 - 2.0 * gy / self.height;
             let ndc_bottom = 1.0 - 2.0 * (gy + info.bm_rows as f32) / self.height;
 
-            out.push(TexturedVertex { position: [ndc_left, ndc_top], uv: [uv.x, uv.y], color: color_arr });
-            out.push(TexturedVertex { position: [ndc_left, ndc_bottom], uv: [uv.x, uv.y + uv.height], color: color_arr });
-            out.push(TexturedVertex { position: [ndc_right, ndc_bottom], uv: [uv.x + uv.width, uv.y + uv.height], color: color_arr });
-            out.push(TexturedVertex { position: [ndc_right, ndc_bottom], uv: [uv.x + uv.width, uv.y + uv.height], color: color_arr });
-            out.push(TexturedVertex { position: [ndc_right, ndc_top], uv: [uv.x + uv.width, uv.y], color: color_arr });
-            out.push(TexturedVertex { position: [ndc_left, ndc_top], uv: [uv.x, uv.y], color: color_arr });
+            out.push(TexturedVertex {
+                position: [ndc_left, ndc_top],
+                uv: [uv.x, uv.y],
+                color: color_arr,
+            });
+            out.push(TexturedVertex {
+                position: [ndc_left, ndc_bottom],
+                uv: [uv.x, uv.y + uv.height],
+                color: color_arr,
+            });
+            out.push(TexturedVertex {
+                position: [ndc_right, ndc_bottom],
+                uv: [uv.x + uv.width, uv.y + uv.height],
+                color: color_arr,
+            });
+            out.push(TexturedVertex {
+                position: [ndc_right, ndc_bottom],
+                uv: [uv.x + uv.width, uv.y + uv.height],
+                color: color_arr,
+            });
+            out.push(TexturedVertex {
+                position: [ndc_right, ndc_top],
+                uv: [uv.x + uv.width, uv.y],
+                color: color_arr,
+            });
+            out.push(TexturedVertex {
+                position: [ndc_left, ndc_top],
+                uv: [uv.x, uv.y],
+                color: color_arr,
+            });
 
             cursor_x += info.adv_x;
         }
     }
+
+    fn add_draw_image() {}
 
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width as f32;

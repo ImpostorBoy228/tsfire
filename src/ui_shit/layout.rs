@@ -447,7 +447,7 @@ fn font_cache() -> Option<&'static FontHandle> {
     static FONT: OnceLock<Option<FontHandle>> = OnceLock::new();
     FONT.get_or_init(|| {
         let paths = [
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            crate::font::DEFAULT_FONT_PATH,
             "/usr/share/fonts/TTF/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         ];

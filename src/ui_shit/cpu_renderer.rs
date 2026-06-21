@@ -15,9 +15,9 @@ pub struct CpuRenderer {
 
 fn load_font() -> Option<FontHandle> {
     let paths = [
+        crate::font::DEFAULT_FONT_PATH,
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
     ];

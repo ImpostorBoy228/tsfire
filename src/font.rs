@@ -147,6 +147,8 @@ mod imp {
 #[cfg_attr(not(freetype_avail), allow(unused_imports))]
 pub use imp::*;
 
+pub const DEFAULT_FONT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/DejaVuSans.ttf");
+
 #[cfg(freetype_avail)]
 #[cfg(test)]
 mod tests {
@@ -154,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_cock_measure() {
-        let font_data: &[u8] = include_bytes!("/usr/share/fonts/TTF/DejaVuSans.ttf");
+        let font_data: &[u8] = include_bytes!("../fonts/DejaVuSans.ttf");
         let boxed: Box<[u8]> = Box::from(font_data);
         let font = FontHandle::load(boxed, 16.0).expect("font_load failed");
         let w = font.measure("Hello World");
@@ -166,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_fill_glyphs() {
-        let font_data: &[u8] = include_bytes!("/usr/share/fonts/TTF/DejaVuSans.ttf");
+        let font_data: &[u8] = include_bytes!("../fonts/DejaVuSans.ttf");
         let boxed: Box<[u8]> = Box::from(font_data);
         let font = FontHandle::load(boxed, 16.0).expect("font_load failed");
         let (infos, bitmap) = font.fill_glyphs("Hi").expect("fill_glyphs failed");
