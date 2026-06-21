@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::event_loop::ControlFlow;
@@ -12,7 +13,9 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
+use crate::parsing::RenderNode;
 use crate::ui_shit::display_renderer;
+use crate::ui_shit::layout::{self, LayoutEngine};
 use crate::ui_shit::paint;
 
 struct WrappedWindow(Arc<Window>);
@@ -179,6 +182,25 @@ impl Renderer {
 struct App {
     state: Option<WindowState>,
     display_list: Option<paint::DisplayList>,
+    render_tree: Option<RenderNode>,
+    decoded_images: Vec<paint::DecodedImage>,
+    image_map: HashMap<String, u32>,
+}
+
+impl App {
+    fn rebuild_display_list(&mut self, width: f32, height: f32) {
+        if width <= 0.0 || height <= 0.0 {
+            return;
+        }
+        if let Some(tree) = &self.render_tree {
+            let engine = layout::BlockLayout;
+            let boxes = engine.layout(tree, layout::Size { width, height });
+            let dl = paint::build_display_list(&boxes, self.decoded_images.clone(), &self.image_map);
+            self.display_list = Some(dl);
+        } else {
+            self.display_list = None;
+        }
+    }
 }
 
 struct WindowState {
@@ -200,6 +222,10 @@ impl ApplicationHandler for App {
             .unwrap();
         let win = Arc::new(win);
         let renderer = pollster::block_on(Renderer::new(win.clone())).unwrap();
+
+        let size = win.inner_size();
+        self.rebuild_display_list(size.width as f32, size.height as f32);
+
         self.state = Some(WindowState {
             _window: win,
             renderer,
@@ -227,7 +253,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Resized(size) => {
-                state.renderer.resize(size);
+                if size.width > 0 && size.height > 0 {
+                    state.renderer.resize(size);
+                    self.rebuild_display_list(size.width as f32, size.height as f32);
+                }
             }
             WindowEvent::RedrawRequested => {
                 state.renderer.render(self.display_list.as_ref());
@@ -246,11 +275,14 @@ impl ApplicationHandler for App {
     }
 }
 
-pub fn run(list: paint::DisplayList) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(tree: Option<RenderNode>, decoded_images: Vec<paint::DecodedImage>, image_map: HashMap<String, u32>) -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
     let mut app = App {
         state: None,
-        display_list: Some(list),
+        display_list: None,
+        render_tree: tree,
+        decoded_images,
+        image_map,
     };
     event_loop.run_app(&mut app)?;
     Ok(())

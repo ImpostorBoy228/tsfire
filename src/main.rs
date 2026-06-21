@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()?;
 
-    let dl = rt.block_on(async {
+    let (render_tree, decoded_images, image_map) = rt.block_on(async {
         let uabilder = network::UaBuild::new(BROWSER);
         let ua = uabilder.build();
         let client = Client::builder()
@@ -63,32 +63,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         use ui_shit::layout::LayoutEngine;
 
-        let dl = if let Some(tree) = render_tree {
-            parsing::tree::dump(&tree);
+        if let Some(ref tree) = render_tree {
+            parsing::tree::dump(tree);
 
             println!("\n--- layout tree ---");
             let layout_engine = ui_shit::layout::BlockLayout;
-            let layout_boxes = layout_engine.layout(&tree, ui_shit::layout::Size { width: 1024.0, height: 768.0 });
+            let layout_boxes = layout_engine.layout(tree, ui_shit::layout::Size { width: 1024.0, height: 768.0 });
             ui_shit::layout::dump_boxes(&layout_boxes);
 
             println!();
             let dl = ui_shit::paint::build_display_list(&layout_boxes, vec![], &std::collections::HashMap::new());
             ui_shit::paint::dump_display_list(&dl);
-            dl
-        } else {
-            ui_shit::paint::DisplayList {
-                items: vec![],
-                text_arena: String::new(),
-                decoded_images: vec![],
-                content_size: ui_shit::layout::Size { width: 1024.0, height: 768.0 },
-            }
-        };
+        }
 
-        Ok::<_, Box<dyn std::error::Error>>(dl)
+        Ok::<_, Box<dyn std::error::Error>>((render_tree, vec![], std::collections::HashMap::new()))
     })?;
 
     drop(rt);
-    ui_shit::window::run(dl)?;
+    ui_shit::window::run(render_tree, decoded_images, image_map)?;
     Ok(())
 }
 
