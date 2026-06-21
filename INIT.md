@@ -59,35 +59,45 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 
 ## TODO
 
-### done
-- [x] deutf8() validation — continuation bytes, overlong, surrogates, >U+10FFFF
-- [x] freetype2 auto-detected at build time; falls back to chars*0.6 estimate when missing
-- [x] **window + gpu context** — `winit` + `wgpu` deps added. window created, wgpu surface/device/queue configured. render pass clears window with dark color on each frame. `window.rs` module.
+### main goal: complete display list generation for full html+css (with stylo)
 
-### plan: wgpu display list renderer (pure winit+wgpu, no webrender)
+1. **stylo bridge — support all computed css properties** — `stylo_integration.rs`:
+   - extract border-* (width, style, color per side) from stylo `ComputedValues`
+   - extract background-image (gradients, urls), background-repeat, background-position
+   - extract opacity, overflow, text-decoration, box-shadow
+   - extract float, clear, vertical-align
+   - ensure every property used by layout/paint is bridged
 
-2. **display renderer module** — `src/ui_shit/display_renderer.rs`:
-   - wgpu pipelines for each `DisplayCommand` type
-   - per-frame geometry batching (solid rects, glyph quads, etc.)
-   - orthographic projection (CSS top-left origin → NDC)
+2. **layout — full coordinate generation for all css modes** — `layout.rs`:
+   - positioned elements (absolute, fixed, relative) with proper containing block
+   - floats (left/right) with clear
+   - inline-block, inline formatting with baseline alignment
+   - overflow → clip rects, scroll offsets
+   - proper box model: content-box vs border-box sizing
+   - margin collapse (adjacent siblings, parent-child)
 
-3. **glyph atlas** — freetype `fill_glyphs()` → wgpu texture atlas:
-   - lazy fill: rasterize glyph on first use, cache in `HashMap<(codepoint, font_size), (atlas_rect, metrics)>`
-   - text rendering: TextRun → lookup each char → textured quad with UV in atlas
+3. **paint — generate all display commands from computed style** — `paint.rs`:
+   - `FillGradient` from background-image linear-gradient / radial-gradient
+   - `DrawImage` from `<img>` tags and background-image urls
+   - `Border` from border-{top,right,bottom,left}-{width,style,color} (solid, dashed, dotted)
+   - `SetClip/PopClip` from overflow:hidden / border-radius
+   - `SetOpacity/PopOpacity` from opacity property
+   - `TextRun` with proper font-family fallback, text-decoration
+   - stacked backgrounds, multiple background layers
 
-4. **solid fill pipeline** — `FillRect`: batched quads, solid color shader
+4. **display renderer — pipelines for every `DisplayCommand`** — `display_renderer.rs`:
+   - solid fill pipeline (FillRect) — batched quads, solid color shader
+   - textured quad pipeline (TextRun + DrawImage) — glyph atlas / stb_image → wgpu texture → quads with UV
+   - gradient pipeline (FillGradient) — shader interpolates between N color stops
+   - clip/opacity — SetClip/PopClip → wgpu scissor rect; SetOpacity/PopOpacity → separate blend pipeline
+   - border — Border → 4 solid rects (top, right, bottom, left) with per-side style
+   - glyph atlas — freetype fill_glyphs() → wgpu texture atlas, lazy rasterize per (codepoint, font_size)
 
-5. **textured quad pipeline** — `TextRun` + `DrawImage`: glyph atlas / stb_image → wgpu texture → quads with UV
-
-6. **gradient pipeline** — `FillGradient`: shader interpolates between two colors
-
-7. **clip & opacity** — `SetClip/PopClip` → wgpu scissor rect; `SetOpacity/PopOpacity` → separate blend pipeline
-
-8. **border** — `Border` → 4 solid rects (top, right, bottom, left)
-
-9. **image pipeline** — `image_handler` (stb_image) decode → wgpu texture upload → `DrawImage`
-
-10. **main loop** — winit: fetch → parse → style → layout → build display list → `DisplayRenderer::render()`
+5. **full html page pipeline** — `main.rs`:
+   - fetch real page → parse → stylo style → render tree → layout → display list → render
+   - dump display list with all command types, verify coordinates visually correct
+   - handle external stylesheets (&lt;link rel="stylesheet"&gt;)
+   - incremental / re-style on viewport resize
 
 
 ## ai code rules

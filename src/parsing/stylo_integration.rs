@@ -26,7 +26,14 @@ use style::device::{Device, servo::FontMetricsProvider};
 use style::media_queries::MediaType;
 use style::queries::values::PrefersColorScheme;
 use style::font_metrics::FontMetrics;
-use style::values::computed::{CSSPixelLength, Length};
+use style::values::computed::{CSSPixelLength, Length, LengthPercentage, NonNegativeLengthPercentage};
+use style::values::computed::{BorderStyle, Overflow, Float, Clear, TextAlign};
+use style::values::computed::image::Image as StyloImage;
+use style::values::computed::position::Inset;
+use style::values::computed::text::TextDecorationLine as StyloTextDecorationLine;
+use style::values::generics::image::GradientItem;
+use style::values::generics::position::GenericInset;
+use style::values::generics::length::GenericSize;
 use style::values::specified::font::QueryFontMetricsFlags;
 use style::values::computed::font::GenericFontFamily;
 use style::servo::media_features::PointerCapabilities;
@@ -483,10 +490,148 @@ pub fn matched_declarations_to_css(rules: &[crate::parsing::CssRule], element: &
     css
 }
 
+fn stylo_color_to_our(color: &style::color::AbsoluteColor) -> crate::parsing::Color {
+    use style::color::ColorSpace;
+    let srgb = color.to_color_space(ColorSpace::Srgb);
+    crate::parsing::Color(
+        (srgb.components.0 * 255.0) as u8,
+        (srgb.components.1 * 255.0) as u8,
+        (srgb.components.2 * 255.0) as u8,
+        (srgb.alpha * 255.0) as u8,
+    )
+}
+
+fn resolve_stylo_color(stylo: &ComputedValues, color: &style::values::computed::Color) -> crate::parsing::Color {
+    stylo_color_to_our(&stylo.resolve_color(color))
+}
+
+fn to_our_length_from_lp(lp: &LengthPercentage) -> crate::parsing::Length {
+    lp.to_length().map(|l| crate::parsing::Length::Px(l.px())).unwrap_or(crate::parsing::Length::Auto)
+}
+
+fn to_our_length_from_nnlp(lp: &NonNegativeLengthPercentage) -> crate::parsing::Length {
+    lp.0.to_length().map(|l| crate::parsing::Length::Px(l.px())).unwrap_or(crate::parsing::Length::Auto)
+}
+
+fn au_to_px(au: &app_units::Au) -> f32 {
+    au.to_f32_px()
+}
+
+fn to_our_px_from_len(len: &Length) -> Option<f32> {
+    Some(len.px())
+}
+
+fn to_our_border_style(s: BorderStyle) -> crate::parsing::BorderStyle {
+    match s {
+        BorderStyle::None => crate::parsing::BorderStyle::None,
+        BorderStyle::Hidden => crate::parsing::BorderStyle::Hidden,
+        BorderStyle::Solid => crate::parsing::BorderStyle::Solid,
+        BorderStyle::Dashed => crate::parsing::BorderStyle::Dashed,
+        BorderStyle::Dotted => crate::parsing::BorderStyle::Dotted,
+        BorderStyle::Double => crate::parsing::BorderStyle::Double,
+        BorderStyle::Groove => crate::parsing::BorderStyle::Groove,
+        BorderStyle::Ridge => crate::parsing::BorderStyle::Ridge,
+        BorderStyle::Inset => crate::parsing::BorderStyle::Inset,
+        BorderStyle::Outset => crate::parsing::BorderStyle::Outset,
+    }
+}
+
+fn to_our_overflow(o: Overflow) -> crate::parsing::Overflow {
+    match o {
+        Overflow::Visible => crate::parsing::Overflow::Visible,
+        Overflow::Hidden => crate::parsing::Overflow::Hidden,
+        Overflow::Scroll => crate::parsing::Overflow::Scroll,
+        Overflow::Auto => crate::parsing::Overflow::Auto,
+        Overflow::Clip => crate::parsing::Overflow::Clip,
+    }
+}
+
+fn to_our_float(f: Float) -> crate::parsing::Float {
+    match f {
+        Float::None => crate::parsing::Float::None,
+        Float::Left => crate::parsing::Float::Left,
+        Float::Right => crate::parsing::Float::Right,
+        Float::InlineStart => crate::parsing::Float::InlineStart,
+        Float::InlineEnd => crate::parsing::Float::InlineEnd,
+    }
+}
+
+fn to_our_clear(c: Clear) -> crate::parsing::Clear {
+    match c {
+        Clear::None => crate::parsing::Clear::None,
+        Clear::Left => crate::parsing::Clear::Left,
+        Clear::Right => crate::parsing::Clear::Right,
+        Clear::Both => crate::parsing::Clear::Both,
+        Clear::InlineStart => crate::parsing::Clear::InlineStart,
+        Clear::InlineEnd => crate::parsing::Clear::InlineEnd,
+    }
+}
+
+fn to_our_text_align(ta: TextAlign) -> crate::parsing::TextAlign {
+    match ta {
+        TextAlign::Left => crate::parsing::TextAlign::Left,
+        TextAlign::Right => crate::parsing::TextAlign::Right,
+        TextAlign::Center => crate::parsing::TextAlign::Center,
+        TextAlign::Justify => crate::parsing::TextAlign::Justify,
+        TextAlign::Start => crate::parsing::TextAlign::Start,
+        TextAlign::End => crate::parsing::TextAlign::End,
+        _ => crate::parsing::TextAlign::Start,
+    }
+}
+
+fn to_our_inset(inset: &Inset) -> crate::parsing::Length {
+    match inset {
+        GenericInset::LengthPercentage(lp) => to_our_length_from_lp(lp),
+        _ => crate::parsing::Length::Auto,
+    }
+}
+
+fn extract_background_images(bg: &style::properties::style_structs::Background) -> Vec<crate::parsing::BackgroundImage> {
+    use style::values::computed::image::Gradient as ComputedGradient;
+    let images = bg.background_image.0.iter();
+    let mut result = Vec::new();
+    for img in images {
+        match img {
+            StyloImage::Gradient(grad) => {
+                let items = match &**grad {
+                    ComputedGradient::Linear { items, .. } => items,
+                    ComputedGradient::Radial { items, .. } => items,
+                    _ => continue,
+                };
+                let colors: Vec<&style::values::computed::Color> = items.iter().filter_map(|item| {
+                    match item {
+                        GradientItem::SimpleColorStop(c) => Some(c),
+                        GradientItem::ComplexColorStop { color, position: _ } => Some(color),
+                        _ => None,
+                    }
+                }).collect();
+                if colors.len() >= 2 {
+                    let from = resolve_stylo_color_from_abs(colors[0]);
+                    let to = resolve_stylo_color_from_abs(colors[colors.len() - 1]);
+                    result.push(crate::parsing::BackgroundImage::Gradient { from, to, vertical: true });
+                }
+            }
+            _ => {}
+        }
+    }
+    result
+}
+
+fn resolve_stylo_color_from_abs(color: &style::values::computed::Color) -> crate::parsing::Color {
+    use style::color::ColorSpace;
+    let abs = color.resolve_to_absolute(&style::color::AbsoluteColor::BLACK);
+    let srgb = abs.to_color_space(ColorSpace::Srgb);
+    crate::parsing::Color(
+        (srgb.components.0 * 255.0) as u8,
+        (srgb.components.1 * 255.0) as u8,
+        (srgb.components.2 * 255.0) as u8,
+        (srgb.alpha * 255.0) as u8,
+    )
+}
+
 /// Convert Stylo's ComputedValues to our custom format
 pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::parsing::ComputedValues {
-    use crate::parsing::{ComputedValues as OurCV, Color, Display, Length, Position};
-    use style::color::ColorSpace;
+    use crate::parsing::{ComputedValues as OurCV, Display, Length, Position, BoxShadow, TextDecorationLine, VerticalAlign};
 
     let box_ = stylo.get_box();
 
@@ -508,61 +653,125 @@ pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::parsing::
     let padding_ = stylo.get_padding();
     let inherited_text = stylo.get_inherited_text();
     let background = stylo.get_background();
+    let border_ = stylo.get_border();
+    let effects_ = stylo.get_effects();
+    let text_ = stylo.get_text();
+    let outline_ = stylo.get_outline();
+    let font_ = stylo.get_font();
 
     let width = match &position_.width {
-        style::values::generics::length::GenericSize::LengthPercentage(lp) => {
-            lp.0.to_length().map(|l| Length::Px(l.px())).unwrap_or(Length::Auto)
-        }
+        GenericSize::LengthPercentage(lp) => to_our_length_from_lp(&lp.0),
         _ => Length::Auto,
     };
 
     let height = match &position_.height {
-        style::values::generics::length::GenericSize::LengthPercentage(lp) => {
-            lp.0.to_length().map(|l| Length::Px(l.px())).unwrap_or(Length::Auto)
-        }
+        GenericSize::LengthPercentage(lp) => to_our_length_from_lp(&lp.0),
         _ => Length::Auto,
     };
 
-    let to_margin = |m: &style::values::generics::length::GenericMargin<style::values::computed::LengthPercentage>| -> Length {
+    let to_margin = |m: &style::values::generics::length::GenericMargin<LengthPercentage>| -> Length {
         match m {
             style::values::generics::length::GenericMargin::LengthPercentage(lp) => {
-                lp.to_length().map(|l| Length::Px(l.px())).unwrap_or(Length::Auto)
+                to_our_length_from_lp(lp)
             }
             _ => Length::Auto,
         }
     };
 
-    let to_padding = |lp: &style::values::computed::NonNegativeLengthPercentage| -> Length {
-        lp.0.to_length().map(|l| Length::Px(l.px())).unwrap_or(Length::Auto)
-    };
-
-    let color_abs = &inherited_text.color;
-    let color = {
-        let srgb = color_abs.to_color_space(ColorSpace::Srgb);
-        Color(
-            (srgb.components.0 * 255.0) as u8,
-            (srgb.components.1 * 255.0) as u8,
-            (srgb.components.2 * 255.0) as u8,
-            (srgb.alpha * 255.0) as u8,
-        )
-    };
-
-    let bg_raw = &background.background_color;
-    let bg = {
-        let abs = bg_raw.resolve_to_absolute(&style::color::AbsoluteColor::BLACK);
-        let srgb = abs.to_color_space(ColorSpace::Srgb);
-        Color(
-            (srgb.components.0 * 255.0) as u8,
-            (srgb.components.1 * 255.0) as u8,
-            (srgb.components.2 * 255.0) as u8,
-            (srgb.alpha * 255.0) as u8,
-        )
-    };
-    let font_size = stylo.get_font().font_size.computed_size.0.px();
+    let color = stylo_color_to_our(&inherited_text.color);
+    let bg = resolve_stylo_color_from_abs(&background.background_color);
+    let font_size = font_.font_size.computed_size.0.px();
     let z_index = match &position_.z_index {
         style::values::generics::position::GenericZIndex::Integer(i) => *i,
         _ => 0,
     };
+
+    // Border
+    let border_top_width = au_to_px(&border_.clone_border_top_width().0);
+    let border_right_width = au_to_px(&border_.clone_border_right_width().0);
+    let border_bottom_width = au_to_px(&border_.clone_border_bottom_width().0);
+    let border_left_width = au_to_px(&border_.clone_border_left_width().0);
+
+    let border_top_style = to_our_border_style(border_.clone_border_top_style());
+    let border_right_style = to_our_border_style(border_.clone_border_right_style());
+    let border_bottom_style = to_our_border_style(border_.clone_border_bottom_style());
+    let border_left_style = to_our_border_style(border_.clone_border_left_style());
+
+    let border_top_color = resolve_stylo_color(stylo, &border_.clone_border_top_color());
+    let border_right_color = resolve_stylo_color(stylo, &border_.clone_border_right_color());
+    let border_bottom_color = resolve_stylo_color(stylo, &border_.clone_border_bottom_color());
+    let border_left_color = resolve_stylo_color(stylo, &border_.clone_border_left_color());
+
+    let border_radius_ = |r: &style::values::computed::BorderCornerRadius| -> f32 {
+        r.0.width.0.to_length().map(|l| l.px()).unwrap_or(0.0)
+    };
+    let border_top_left_radius = border_radius_(&border_.clone_border_top_left_radius());
+    let border_top_right_radius = border_radius_(&border_.clone_border_top_right_radius());
+    let border_bottom_right_radius = border_radius_(&border_.clone_border_bottom_right_radius());
+    let border_bottom_left_radius = border_radius_(&border_.clone_border_bottom_left_radius());
+
+    // Effects
+    let opacity = effects_.clone_opacity();
+    let box_shadow: Vec<BoxShadow> = effects_.clone_box_shadow().0.iter().map(|bs| {
+        BoxShadow {
+            offset_x: bs.base.horizontal.px(),
+            offset_y: bs.base.vertical.px(),
+            blur: bs.base.blur.0.px(),
+            spread: bs.spread.px(),
+            color: resolve_stylo_color(stylo, &bs.base.color),
+            inset: bs.inset,
+        }
+    }).collect();
+
+    // Overflow
+    let overflow_x = to_our_overflow(box_.clone_overflow_x());
+    let overflow_y = to_our_overflow(box_.clone_overflow_y());
+
+    // Float / Clear
+    let float = to_our_float(box_.clone_float());
+    let clear = to_our_clear(box_.clone_clear());
+
+    // Position offsets
+    let top = to_our_inset(&position_.top);
+    let right = to_our_inset(&position_.right);
+    let bottom = to_our_inset(&position_.bottom);
+    let left = to_our_inset(&position_.left);
+
+    // Background image
+    let background_image = extract_background_images(background);
+
+    // Text decoration
+    let td_line = text_.clone_text_decoration_line();
+    let text_decoration_line = TextDecorationLine {
+        underline: td_line.contains(StyloTextDecorationLine::UNDERLINE),
+        overline: td_line.contains(StyloTextDecorationLine::OVERLINE),
+        line_through: td_line.contains(StyloTextDecorationLine::LINE_THROUGH),
+        blink: td_line.contains(StyloTextDecorationLine::BLINK),
+    };
+    let text_decoration_color = resolve_stylo_color(stylo, &text_.clone_text_decoration_color());
+    let td_style = text_.clone_text_decoration_style();
+    let text_decoration_style = match td_style {
+        style::properties::longhands::text_decoration_style::computed_value::T::Solid => crate::parsing::BorderStyle::Solid,
+        style::properties::longhands::text_decoration_style::computed_value::T::Double => crate::parsing::BorderStyle::Double,
+        style::properties::longhands::text_decoration_style::computed_value::T::Dotted => crate::parsing::BorderStyle::Dotted,
+        style::properties::longhands::text_decoration_style::computed_value::T::Dashed => crate::parsing::BorderStyle::Dashed,
+        style::properties::longhands::text_decoration_style::computed_value::T::Wavy => crate::parsing::BorderStyle::Solid,
+        _ => crate::parsing::BorderStyle::None,
+    };
+
+    // Text align
+    let text_align = to_our_text_align(inherited_text.clone_text_align());
+
+    // Vertical align — default baseline for now
+    let vertical_align = VerticalAlign::Baseline;
+
+    // Outline
+    let outline_width = au_to_px(&outline_.clone_outline_width().0);
+    let outline_style = match outline_.clone_outline_style() {
+        style::values::computed::OutlineStyle::Auto => crate::parsing::BorderStyle::None,
+        style::values::computed::OutlineStyle::BorderStyle(s) => to_our_border_style(s),
+    };
+    let outline_color = resolve_stylo_color(stylo, &outline_.clone_outline_color());
 
     OurCV {
         display,
@@ -573,14 +782,55 @@ pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::parsing::
         margin_right: to_margin(&margin_.margin_right),
         margin_bottom: to_margin(&margin_.margin_bottom),
         margin_left: to_margin(&margin_.margin_left),
-        padding_top: to_padding(&padding_.padding_top),
-        padding_right: to_padding(&padding_.padding_right),
-        padding_bottom: to_padding(&padding_.padding_bottom),
-        padding_left: to_padding(&padding_.padding_left),
+        padding_top: to_our_length_from_nnlp(&padding_.padding_top),
+        padding_right: to_our_length_from_nnlp(&padding_.padding_right),
+        padding_bottom: to_our_length_from_nnlp(&padding_.padding_bottom),
+        padding_left: to_our_length_from_nnlp(&padding_.padding_left),
         color,
         background_color: bg,
         font_size,
         z_index,
+
+        border_top_width,
+        border_right_width,
+        border_bottom_width,
+        border_left_width,
+        border_top_style,
+        border_right_style,
+        border_bottom_style,
+        border_left_style,
+        border_top_color,
+        border_right_color,
+        border_bottom_color,
+        border_left_color,
+        border_top_left_radius,
+        border_top_right_radius,
+        border_bottom_right_radius,
+        border_bottom_left_radius,
+
+        opacity,
+        box_shadow,
+
+        overflow_x,
+        overflow_y,
+        float,
+        clear,
+        top,
+        right,
+        bottom,
+        left,
+
+        background_image,
+
+        text_decoration_line,
+        text_decoration_color,
+        text_decoration_style,
+        text_align,
+        vertical_align,
+
+        outline_width,
+        outline_style,
+        outline_color,
     }
 }
 
