@@ -9,6 +9,19 @@ use reqwest::Client;
 
 const BROWSER: &str = "tsfire";
 
+fn resolve_url(base: &str, rel: &str) -> String {
+    use url::Url;
+    if let Ok(parsed) = Url::parse(rel) {
+        return parsed.to_string();
+    }
+    if let Ok(base_url) = Url::parse(base) {
+        if let Ok(resolved) = base_url.join(rel) {
+            return resolved.to_string();
+        }
+    }
+    rel.to_string()
+}
+
 async fn gget(client: &Client, url: &str) ->
     Result<String, reqwest::Error> {
     let body = client.get(url)
@@ -20,6 +33,7 @@ async fn gget(client: &Client, url: &str) ->
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let url = std::env::args().nth(1).unwrap_or_else(|| String::from("https://example.com/"));
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -31,9 +45,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .user_agent(ua)
             .build()?;
 
-        let response = gget(&client, "https://example.com/").await?;
-        let dom = parsing::parse::phtml(&response);
-        let css_rules = parsing::parse::collect_css(&dom);
+        let html = gget(&client, &url).await?;
+        let dom = parsing::parse::phtml(&html);
+        let mut css_rules = parsing::parse::collect_css(&dom);
+
+        // fetch external stylesheets
+        let external_urls = parsing::parse::collect_external_stylesheet_urls(&dom);
+        for href in &external_urls {
+            let abs_url = resolve_url(&url, href);
+            if let Ok(css_text) = gget(&client, &abs_url).await {
+                let rules = parsing::parse::parse_css(&css_text);
+                css_rules.extend(rules);
+            }
+        }
         let render_tree = parsing::tree::build(&dom.document, &css_rules);
 
         use ui_shit::layout::LayoutEngine;

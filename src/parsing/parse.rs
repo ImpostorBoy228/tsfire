@@ -583,6 +583,32 @@ pub fn collect_css(dom: &RcDom) -> Vec<CssRule> {
     all_rules
 }
 
+pub fn collect_external_stylesheet_urls(dom: &RcDom) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut collector = |node: &Handle| {
+        if let NodeData::Element { name, attrs, .. } = &node.data {
+            if name.local.as_ref() == "link" {
+                let mut is_stylesheet = false;
+                let mut href = String::new();
+                let attrs = attrs.borrow();
+                for attr in attrs.iter() {
+                    if attr.name.local.as_ref() == "rel" && attr.value.as_ref() == "stylesheet" {
+                        is_stylesheet = true;
+                    }
+                    if attr.name.local.as_ref() == "href" {
+                        href = attr.value.as_ref().to_string();
+                    }
+                }
+                if is_stylesheet && !href.is_empty() {
+                    urls.push(href);
+                }
+            }
+        }
+    };
+    walk(&dom.document, &mut collector);
+    urls
+}
+
 pub fn parse_css(css_text: &str) -> Vec<CssRule> {
     let mut input = ParserInput::new(css_text);
     let mut parser = CssParser::new(&mut input);
