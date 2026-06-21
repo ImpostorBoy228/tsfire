@@ -72,14 +72,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui_shit::layout::dump_boxes(&layout_boxes);
 
             println!();
-            let dl = ui_shit::paint::build_display_list(&layout_boxes);
+            let dl = ui_shit::paint::build_display_list(&layout_boxes, vec![], &std::collections::HashMap::new());
             ui_shit::paint::dump_display_list(&dl);
             dl
         } else {
             ui_shit::paint::DisplayList {
                 items: vec![],
                 text_arena: String::new(),
-                images: vec![],
+                decoded_images: vec![],
                 content_size: ui_shit::layout::Size { width: 1024.0, height: 768.0 },
             }
         };

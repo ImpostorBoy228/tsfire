@@ -227,6 +227,11 @@ pub struct DisplayRenderer {
     dummy_sampler: wgpu::Sampler,
     font_cache: Option<FontCache>,
     glyph_metrics_cache: crate::cache::GlyphMetricsCache,
+    image_textures: Vec<wgpu::Texture>,
+    image_views: Vec<wgpu::TextureView>,
+    image_bind_groups: Vec<wgpu::BindGroup>,
+    image_vb: wgpu::Buffer,
+    image_vb_capacity: u64,
 
     clip_rect: Option<layout::Rect>,
     global_alpha: f32,
@@ -556,6 +561,12 @@ impl DisplayRenderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let image_vb = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("image_vb"),
+            size: initial_vb_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Self {
             device,
@@ -571,6 +582,11 @@ impl DisplayRenderer {
             dummy_sampler,
             font_cache,
             glyph_metrics_cache,
+            image_textures: vec![],
+            image_views: vec![],
+            image_bind_groups: vec![],
+            image_vb,
+            image_vb_capacity: initial_vb_size,
             clip_rect: None,
             global_alpha: 1.0,
             solid_vb,
@@ -620,6 +636,8 @@ impl DisplayRenderer {
         let mut solid_vertices: Vec<SolidVertex> = Vec::new();
         let mut gradient_vertices: Vec<GradientVert> = Vec::new();
         let mut textured_vertices: Vec<TexturedVertex> = Vec::new();
+        let mut image_vertices: Vec<TexturedVertex> = Vec::new();
+        let mut image_draws: Vec<(u32, u32)> = Vec::new(); // (img_idx, num_vertices)
 
         for cmd in &list.items {
             match cmd {
@@ -716,7 +734,14 @@ impl DisplayRenderer {
                 paint::DisplayCommand::PopOpacity => {
                     self.global_alpha = 1.0;
                 }
-                _ => {}
+                paint::DisplayCommand::DrawImage(rect, idx) => {
+                    let n = image_vertices.len() as u32;
+                    self.add_draw_image(rect, *idx, &mut image_vertices);
+                    let added = image_vertices.len() as u32 - n;
+                    if added > 0 {
+                        image_draws.push((*idx, added));
+                    }
+                }
             }
         }
 
@@ -769,6 +794,20 @@ impl DisplayRenderer {
                 bytemuck::cast_slice(&gradient_vertices),
             );
         }
+        self.ensure_image_textures(list);
+        if !image_vertices.is_empty() {
+            let needed = (image_vertices.len() * std::mem::size_of::<TexturedVertex>()) as u64;
+            if needed > self.image_vb_capacity {
+                self.image_vb_capacity = (needed as f64 * 1.5) as u64;
+                self.image_vb = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("image_vb"),
+                    size: self.image_vb_capacity,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            self.queue.write_buffer(&self.image_vb, 0, bytemuck::cast_slice(&image_vertices));
+        }
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -810,6 +849,20 @@ impl DisplayRenderer {
                 pass.set_bind_group(0, &self.textured_bind_group, &[]);
                 pass.set_vertex_buffer(0, self.textured_vb.slice(..));
                 pass.draw(0..textured_vertices.len() as u32, 0..1);
+            }
+
+            if !image_draws.is_empty() {
+                pass.set_pipeline(&self.textured_pipeline);
+                let mut vb_offset: u64 = 0;
+                for &(img_idx, vcount) in &image_draws {
+                    if let Some(bg) = self.image_bind_groups.get(img_idx as usize) {
+                        let size = (vcount as u64) * std::mem::size_of::<TexturedVertex>() as u64;
+                        pass.set_bind_group(0, bg, &[]);
+                        pass.set_vertex_buffer(0, self.image_vb.slice(vb_offset..vb_offset + size));
+                        pass.draw(0..vcount, 0..1);
+                        vb_offset += size;
+                    }
+                }
             }
         }
 
@@ -926,6 +979,86 @@ impl DisplayRenderer {
         out.push(GradientVert { pos_t: [ndc_right, ndc_bottom, t_bottom, 0.0], from_rgba: from, to_rgba: to });
         out.push(GradientVert { pos_t: [ndc_right, ndc_top, t_top, 0.0], from_rgba: from, to_rgba: to });
         out.push(GradientVert { pos_t: [ndc_left, ndc_top, t_top, 0.0], from_rgba: from, to_rgba: to });
+    }
+
+    fn ensure_image_textures(&mut self, list: &paint::DisplayList) {
+        if list.decoded_images.len() <= self.image_textures.len() {
+            return;
+        }
+        for i in self.image_textures.len()..list.decoded_images.len() {
+            let img = &list.decoded_images[i];
+            let extent = wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 };
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(&format!("img_{i}")),
+                size: extent,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &img.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(img.width * 4),
+                    rows_per_image: Some(img.height),
+                },
+                extent,
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(&format!("img_bg_{i}")),
+                layout: &self.textured_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&self.dummy_sampler) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                ],
+            });
+            self.image_textures.push(texture);
+            self.image_views.push(view);
+            self.image_bind_groups.push(bind_group);
+        }
+    }
+
+    fn add_draw_image(
+        &self,
+        rect: &layout::Rect,
+        _img_idx: u32,
+        out: &mut Vec<TexturedVertex>,
+    ) {
+        let r = match self.clip_rect {
+            Some(cr) => {
+                let x = rect.x.max(cr.x);
+                let y = rect.y.max(cr.y);
+                let right = (rect.x + rect.width).min(cr.x + cr.width);
+                let bottom = (rect.y + rect.height).min(cr.y + cr.height);
+                if x >= right || y >= bottom { return; }
+                layout::Rect { x, y, width: right - x, height: bottom - y }
+            }
+            None => *rect,
+        };
+
+        let ndc_left = -1.0 + 2.0 * r.x / self.width;
+        let ndc_right = -1.0 + 2.0 * (r.x + r.width) / self.width;
+        let ndc_top = 1.0 - 2.0 * r.y / self.height;
+        let ndc_bottom = 1.0 - 2.0 * (r.y + r.height) / self.height;
+
+        let white = [1.0, 1.0, 1.0, 1.0 * self.global_alpha];
+        // full-texture UV
+        out.push(TexturedVertex { position: [ndc_left, ndc_top],    uv: [0.0, 0.0], color: white });
+        out.push(TexturedVertex { position: [ndc_left, ndc_bottom], uv: [0.0, 1.0], color: white });
+        out.push(TexturedVertex { position: [ndc_right, ndc_bottom], uv: [1.0, 1.0], color: white });
+        out.push(TexturedVertex { position: [ndc_right, ndc_bottom], uv: [1.0, 1.0], color: white });
+        out.push(TexturedVertex { position: [ndc_right, ndc_top],    uv: [1.0, 0.0], color: white });
+        out.push(TexturedVertex { position: [ndc_left, ndc_top],    uv: [0.0, 0.0], color: white });
     }
 
     fn add_text_run(

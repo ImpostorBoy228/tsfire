@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::ui_shit::layout::{LayoutBox, Rect, Size};
 use crate::parsing::{Color, Display, BorderStyle as ParsedBorderStyle};
 
@@ -29,6 +31,14 @@ pub struct Gradient {
 pub type ImageIndex = u32;
 pub type FontFamily = u8;
 
+/// A decoded RGBA image for the display list.
+#[derive(Clone, Debug)]
+pub struct DecodedImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TextRange {
     pub start: u32,
@@ -59,27 +69,34 @@ pub enum DisplayCommand {
 }
 
 /// Complete flat display list for a page.
-/// No per-element heap allocations — text lives in `text_arena`, images in `images`.
+/// No per-element heap allocations — text lives in `text_arena`.
 #[derive(Debug)]
 pub struct DisplayList {
     pub items: Vec<DisplayCommand>,
     pub text_arena: String,
-    pub images: Vec<ImageData>,
+    pub decoded_images: Vec<DecodedImage>,
     pub content_size: Size,
 }
 
 // --- Builder ---
 
-pub fn build_display_list(boxes: &[LayoutBox]) -> DisplayList {
+/// Build a display list from layout boxes.
+///
+/// `image_map` maps CSS/element image URLs → index into `decoded_images`.
+pub fn build_display_list(
+    boxes: &[LayoutBox],
+    decoded_images: Vec<DecodedImage>,
+    image_map: &HashMap<String, u32>,
+) -> DisplayList {
     let mut items = Vec::new();
     let mut text_arena = String::new();
     let content_size = box_tree_extent(boxes);
 
     for box_ in boxes {
-        paint_box(box_, &mut items, &mut text_arena);
+        paint_box(box_, &mut items, &mut text_arena, image_map);
     }
 
-    DisplayList { items, text_arena, images: Vec::new(), content_size }
+    DisplayList { items, text_arena, decoded_images, content_size }
 }
 
 fn box_tree_extent(boxes: &[LayoutBox]) -> Size {
@@ -93,7 +110,7 @@ fn box_tree_extent(boxes: &[LayoutBox]) -> Size {
     Size { width: w, height: h }
 }
 
-fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut String) {
+fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut String, image_map: &HashMap<String, u32>) {
     if box_.style.opacity < 1.0 {
         items.push(DisplayCommand::SetOpacity(box_.style.opacity));
     }
@@ -110,11 +127,16 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
         ));
     }
 
-    // 2. background fill / gradient
+    // 2. background fill / gradient / image
     if let Some(bi) = box_.style.background_image.first() {
         match bi {
             crate::parsing::BackgroundImage::Gradient { from, to, vertical } => {
                 items.push(DisplayCommand::FillGradient(box_.rect, Gradient { from: *from, to: *to, vertical: *vertical }));
+            }
+            crate::parsing::BackgroundImage::Url(url) => {
+                if let Some(&img_idx) = image_map.get(url) {
+                    items.push(DisplayCommand::DrawImage(box_.rect, img_idx));
+                }
             }
             _ => {}
         }
@@ -136,32 +158,32 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
     // 3. z-index < 0 (ascending)
     for child in &neg {
         if child.style.display == Display::Block {
-            paint_box(child, items, text_arena);
+            paint_box(child, items, text_arena, image_map);
         }
     }
 
     // 4. z-index == 0 block then inline
     for child in &zero {
         if child.style.display == Display::Block {
-            paint_box(child, items, text_arena);
+            paint_box(child, items, text_arena, image_map);
         }
     }
     for child in &zero {
         if child.style.display != Display::Block {
-            paint_box(child, items, text_arena);
+            paint_box(child, items, text_arena, image_map);
         }
     }
 
     // 5. z-index > 0 (ascending)
     for child in &pos {
-        paint_box(child, items, text_arena);
+        paint_box(child, items, text_arena, image_map);
     }
 
     // 6. positioned children (painted above normal flow)
     let (neg_p, zero_p, pos_p) = partition_by_z_index(&box_.positioned_children);
-    for c in &neg_p { paint_box(c, items, text_arena); }
-    for c in &zero_p { paint_box(c, items, text_arena); }
-    for c in &pos_p { paint_box(c, items, text_arena); }
+    for c in &neg_p { paint_box(c, items, text_arena, image_map); }
+    for c in &zero_p { paint_box(c, items, text_arena, image_map); }
+    for c in &pos_p { paint_box(c, items, text_arena, image_map); }
 
     // 7. text
     if box_.tag == "#text" && !box_.text.is_empty() {
@@ -362,16 +384,18 @@ mod tests {
         }).collect()
     }
 
+    fn empty_image_map() -> HashMap<String, u32> { HashMap::new() }
+
     #[test]
     fn test_empty_display_list() {
-        let dl = build_display_list(&[]);
+        let dl = build_display_list(&[], vec![], &empty_image_map());
         assert!(dl.items.is_empty());
     }
 
     #[test]
     fn test_text_run() {
         let box_ = make_text_box("hello");
-        let dl = build_display_list(&[box_]);
+        let dl = build_display_list(&[box_], vec![], &empty_image_map());
         assert_eq!(collect_names(&dl), vec!["TextRun"]);
     }
 
@@ -389,7 +413,7 @@ mod tests {
         s.border_left_style = ParsedBorderStyle::Solid;
 
         let box_ = make_layout("div", s, vec![]);
-        let dl = build_display_list(&[box_]);
+        let dl = build_display_list(&[box_], vec![], &empty_image_map());
         let names = collect_names(&dl);
         assert!(names.contains(&"Border"), "expected Border command, got {:?}", names);
     }
@@ -398,7 +422,7 @@ mod tests {
     fn test_no_border_when_zero_width() {
         let s = ComputedValues::default();
         let box_ = make_layout("div", s, vec![]);
-        let dl = build_display_list(&[box_]);
+        let dl = build_display_list(&[box_], vec![], &empty_image_map());
         let names = collect_names(&dl);
         assert!(!names.contains(&"Border"));
     }
@@ -409,7 +433,7 @@ mod tests {
         s.opacity = 0.5;
         let child = make_text_box("inner");
         let box_ = make_layout("div", s, vec![child]);
-        let dl = build_display_list(&[box_]);
+        let dl = build_display_list(&[box_], vec![], &empty_image_map());
         let names = collect_names(&dl);
         assert!(names.contains(&"SetOpacity"), "expected SetOpacity, got {:?}", names);
         assert!(names.contains(&"PopOpacity"), "expected PopOpacity, got {:?}", names);
@@ -425,7 +449,7 @@ mod tests {
         s.overflow_y = Overflow::Hidden;
         let mut box_ = make_layout("div", s, vec![]);
         box_.clip_rect = Some(Rect { x: 0.0, y: 0.0, width: 100.0, height: 50.0 });
-        let dl = build_display_list(&[box_]);
+        let dl = build_display_list(&[box_], vec![], &empty_image_map());
         let names = collect_names(&dl);
         assert!(names.contains(&"SetClip"), "expected SetClip, got {:?}", names);
         assert!(names.contains(&"PopClip"), "expected PopClip, got {:?}", names);
@@ -440,7 +464,7 @@ mod tests {
             vertical: true,
         }];
         let box_ = make_layout("div", s, vec![]);
-        let dl = build_display_list(&[box_]);
+        let dl = build_display_list(&[box_], vec![], &empty_image_map());
         let names = collect_names(&dl);
         assert!(names.contains(&"FillGradient"), "expected FillGradient, got {:?}", names);
     }
@@ -449,7 +473,7 @@ mod tests {
     fn test_children_are_painted() {
         let child = make_text_box("child");
         let box_ = make_layout("div", ComputedValues::default(), vec![child]);
-        let dl = build_display_list(&[box_]);
+        let dl = build_display_list(&[box_], vec![], &empty_image_map());
         let names = collect_names(&dl);
         assert!(names.contains(&"TextRun"));
     }
