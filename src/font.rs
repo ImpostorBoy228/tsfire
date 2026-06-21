@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_cock_measure() {
-        let font_data: &[u8] = include_bytes!("/usr/share/fonts/noto/NotoSans-Regular.ttf");
+        let font_data: &[u8] = include_bytes!("/usr/share/fonts/TTF/DejaVuSans.ttf");
         let boxed: Box<[u8]> = Box::from(font_data);
         let font = FontHandle::load(boxed, 16.0).expect("font_load failed");
         let w = font.measure("Hello World");
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_fill_glyphs() {
-        let font_data: &[u8] = include_bytes!("/usr/share/fonts/noto/NotoSans-Regular.ttf");
+        let font_data: &[u8] = include_bytes!("/usr/share/fonts/TTF/DejaVuSans.ttf");
         let boxed: Box<[u8]> = Box::from(font_data);
         let font = FontHandle::load(boxed, 16.0).expect("font_load failed");
         let (infos, bitmap) = font.fill_glyphs("Hi").expect("fill_glyphs failed");
