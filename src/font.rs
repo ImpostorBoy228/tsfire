@@ -4,6 +4,7 @@ mod imp {
     use std::ffi::c_void;
     use std::ptr;
 
+    #[derive(Clone)]
     #[repr(C)]
     pub struct GlyphInfo {
         pub codepoint: u32,
@@ -125,6 +126,7 @@ mod imp {
 // stub — used when freetype2 is not available
 #[cfg(not(freetype_avail))]
 mod imp {
+    #[derive(Clone)]
     pub struct GlyphInfo;
 
     pub struct FontHandle;

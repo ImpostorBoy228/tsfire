@@ -1,6 +1,10 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use winit::event_loop::ControlFlow;
 
-use raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle};
+use raw_window_handle::{
+    DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
@@ -48,16 +52,14 @@ impl Renderer {
             .await
             .map_err(|e| format!("adapter request: {e}"))?;
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("tsfire device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_defaults(),
-                    memory_hints: wgpu::MemoryHints::MemoryUsage,
-                    trace: wgpu::Trace::Off,
-                    ..Default::default()
-                },
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("tsfire device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::downlevel_defaults(),
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
+                trace: wgpu::Trace::Off,
+                ..Default::default()
+            })
             .await?;
         let caps = surface.get_capabilities(&adapter);
         let limits = device.limits();
@@ -85,7 +87,14 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        Ok(Self { device, queue, surface, config, display_renderer: None, limits })
+        Ok(Self {
+            device,
+            queue,
+            surface,
+            config,
+            display_renderer: None,
+            limits,
+        })
     }
 
     fn ensure_renderer(&mut self) {
@@ -133,9 +142,9 @@ impl Renderer {
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.1,
-                                g: 0.05,
-                                b: 0.06,
+                                r: 0.0,
+                                g: 0.0,
+                                b: 0.0,
                                 a: 1.0,
                             }),
                             store: wgpu::StoreOp::Store,
@@ -191,15 +200,13 @@ impl ApplicationHandler for App {
             .unwrap();
         let win = Arc::new(win);
         let renderer = pollster::block_on(Renderer::new(win.clone())).unwrap();
-        self.state = Some(WindowState { _window: win, renderer });
+        self.state = Some(WindowState {
+            _window: win,
+            renderer,
+        });
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _id: WindowId,
-        event: WindowEvent,
-    ) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let state = match self.state.as_mut() {
             Some(s) => s,
             None => return,
@@ -229,8 +236,11 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(state) = &self.state {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_secs_f64(1.0 / 60.0),
+            ));
             state._window.request_redraw();
         }
     }

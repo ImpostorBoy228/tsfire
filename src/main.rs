@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod cache;
 mod network;
 mod parsing;
 mod ui_shit;

@@ -217,9 +217,15 @@ pub struct DisplayRenderer {
     glyph_atlas: Option<GlyphAtlas>,
     dummy_sampler: wgpu::Sampler,
     font_cache: Option<FontCache>,
+    glyph_metrics_cache: crate::cache::GlyphMetricsCache,
 
     clip_rect: Option<layout::Rect>,
     global_alpha: f32,
+
+    solid_vb: wgpu::Buffer,
+    solid_vb_capacity: u64,
+    textured_vb: wgpu::Buffer,
+    textured_vb_capacity: u64,
 }
 
 fn vertex_buffer_layout_solid<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -332,9 +338,9 @@ impl DisplayRenderer {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
         let dummy_tex_view = dummy_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -444,6 +450,21 @@ impl DisplayRenderer {
         });
 
         let font_cache = FontCache::load();
+        let glyph_metrics_cache = crate::cache::GlyphMetricsCache::new();
+
+        let initial_vb_size: u64 = 64 * 1024;
+        let solid_vb = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("solid_vb"),
+            size: initial_vb_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let textured_vb = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("textured_vb"),
+            size: initial_vb_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         Self {
             device,
@@ -457,8 +478,13 @@ impl DisplayRenderer {
             glyph_atlas: None,
             dummy_sampler,
             font_cache,
+            glyph_metrics_cache,
             clip_rect: None,
             global_alpha: 1.0,
+            solid_vb,
+            solid_vb_capacity: initial_vb_size,
+            textured_vb,
+            textured_vb_capacity: initial_vb_size,
         }
     }
 
@@ -506,29 +532,74 @@ impl DisplayRenderer {
                     self.add_fill_rect(rect, color, &mut solid_vertices);
                 }
                 paint::DisplayCommand::FillGradient(rect, _) => {
-                    self.add_fill_rect(rect, &crate::parsing::Color(200, 200, 200, 200), &mut solid_vertices);
+                    self.add_fill_rect(
+                        rect,
+                        &crate::parsing::Color(200, 200, 200, 200),
+                        &mut solid_vertices,
+                    );
                 }
                 paint::DisplayCommand::Border(rect, sides) => {
                     let r = *rect;
                     // top
                     if sides[0].width > 0.0 && sides[0].style != paint::BorderStyle::None {
-                        self.add_fill_rect(&layout::Rect { x: r.x, y: r.y, width: r.width, height: sides[0].width }, &sides[0].color, &mut solid_vertices);
+                        self.add_fill_rect(
+                            &layout::Rect {
+                                x: r.x,
+                                y: r.y,
+                                width: r.width,
+                                height: sides[0].width,
+                            },
+                            &sides[0].color,
+                            &mut solid_vertices,
+                        );
                     }
                     // right
                     if sides[1].width > 0.0 && sides[1].style != paint::BorderStyle::None {
-                        self.add_fill_rect(&layout::Rect { x: r.x + r.width - sides[1].width, y: r.y, width: sides[1].width, height: r.height }, &sides[1].color, &mut solid_vertices);
+                        self.add_fill_rect(
+                            &layout::Rect {
+                                x: r.x + r.width - sides[1].width,
+                                y: r.y,
+                                width: sides[1].width,
+                                height: r.height,
+                            },
+                            &sides[1].color,
+                            &mut solid_vertices,
+                        );
                     }
                     // bottom
                     if sides[2].width > 0.0 && sides[2].style != paint::BorderStyle::None {
-                        self.add_fill_rect(&layout::Rect { x: r.x, y: r.y + r.height - sides[2].width, width: r.width, height: sides[2].width }, &sides[2].color, &mut solid_vertices);
+                        self.add_fill_rect(
+                            &layout::Rect {
+                                x: r.x,
+                                y: r.y + r.height - sides[2].width,
+                                width: r.width,
+                                height: sides[2].width,
+                            },
+                            &sides[2].color,
+                            &mut solid_vertices,
+                        );
                     }
                     // left
                     if sides[3].width > 0.0 && sides[3].style != paint::BorderStyle::None {
-                        self.add_fill_rect(&layout::Rect { x: r.x, y: r.y, width: sides[3].width, height: r.height }, &sides[3].color, &mut solid_vertices);
+                        self.add_fill_rect(
+                            &layout::Rect {
+                                x: r.x,
+                                y: r.y,
+                                width: sides[3].width,
+                                height: r.height,
+                            },
+                            &sides[3].color,
+                            &mut solid_vertices,
+                        );
                     }
                 }
                 paint::DisplayCommand::DrawBoxShadow(rect, color, _ox, _oy, _blur) => {
-                    let shadow_color = crate::parsing::Color(color.0, color.1, color.2, (color.3 as f32 * 0.5) as u8);
+                    let shadow_color = crate::parsing::Color(
+                        color.0,
+                        color.1,
+                        color.2,
+                        (color.3 as f32 * 0.5) as u8,
+                    );
                     self.add_fill_rect(rect, &shadow_color, &mut solid_vertices);
                 }
                 paint::DisplayCommand::TextRun(rect, color, font_size, font_family, range) => {
@@ -558,6 +629,39 @@ impl DisplayRenderer {
             }
         }
 
+        // write vertex data to dynamic gpu buffers
+        if !solid_vertices.is_empty() {
+            let needed = (solid_vertices.len() * std::mem::size_of::<SolidVertex>()) as u64;
+            if needed > self.solid_vb_capacity {
+                self.solid_vb_capacity = (needed as f64 * 1.5) as u64;
+                self.solid_vb = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("solid_vb"),
+                    size: self.solid_vb_capacity,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            self.queue
+                .write_buffer(&self.solid_vb, 0, bytemuck::cast_slice(&solid_vertices));
+        }
+        if !textured_vertices.is_empty() {
+            let needed = (textured_vertices.len() * std::mem::size_of::<TexturedVertex>()) as u64;
+            if needed > self.textured_vb_capacity {
+                self.textured_vb_capacity = (needed as f64 * 1.5) as u64;
+                self.textured_vb = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("textured_vb"),
+                    size: self.textured_vb_capacity,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            self.queue.write_buffer(
+                &self.textured_vb,
+                0,
+                bytemuck::cast_slice(&textured_vertices),
+            );
+        }
+
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tsfire pass"),
@@ -567,9 +671,9 @@ impl DisplayRenderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.05,
-                            b: 0.06,
+                            r: 1.0,
+                            g: 1.0,
+                            b: 1.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -582,31 +686,15 @@ impl DisplayRenderer {
             });
 
             if !solid_vertices.is_empty() {
-                let vb = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("solid_vertices"),
-                        usage: wgpu::BufferUsages::VERTEX,
-                        contents: bytemuck::cast_slice(&solid_vertices),
-                    });
-
                 pass.set_pipeline(&self.solid_pipeline);
-                pass.set_vertex_buffer(0, vb.slice(..));
+                pass.set_vertex_buffer(0, self.solid_vb.slice(..));
                 pass.draw(0..solid_vertices.len() as u32, 0..1);
             }
 
             if !textured_vertices.is_empty() {
-                let vb = self
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("textured_vertices"),
-                        usage: wgpu::BufferUsages::VERTEX,
-                        contents: bytemuck::cast_slice(&textured_vertices),
-                    });
-
                 pass.set_pipeline(&self.textured_pipeline);
                 pass.set_bind_group(0, &self.textured_bind_group, &[]);
-                pass.set_vertex_buffer(0, vb.slice(..));
+                pass.set_vertex_buffer(0, self.textured_vb.slice(..));
                 pass.draw(0..textured_vertices.len() as u32, 0..1);
             }
         }
@@ -630,7 +718,12 @@ impl DisplayRenderer {
                 if x >= right || y >= bottom {
                     return;
                 }
-                layout::Rect { x, y, width: right - x, height: bottom - y }
+                layout::Rect {
+                    x,
+                    y,
+                    width: right - x,
+                    height: bottom - y,
+                }
             }
             None => *rect,
         };
@@ -693,10 +786,21 @@ impl DisplayRenderer {
         };
 
         let end = (range.start + range.len) as usize;
-        let text = if end <= list.text_arena.len() { &list.text_arena[range.start as usize..end] } else { return };
-        let (glyphs, bitmap) = match font.fill_glyphs(text) {
-            Some(v) => v,
-            None => return,
+        let text = if end <= list.text_arena.len() {
+            &list.text_arena[range.start as usize..end]
+        } else {
+            return;
+        };
+        let (glyphs, bitmap) = match self.glyph_metrics_cache.get(font, font_size, text) {
+            Some(cached) => (cached.clone(), Vec::new()),
+            None => {
+                let (g, b) = match font.fill_glyphs(text) {
+                    Some(v) => v,
+                    None => return,
+                };
+                self.glyph_metrics_cache.insert(font, font_size, text, g.clone());
+                (g, b)
+            }
         };
 
         self.init_glyph_atlas();
@@ -711,7 +815,7 @@ impl DisplayRenderer {
         let ca = color.3 as f32 / 255.0 * self.global_alpha;
         let color_arr = [cr, cg, cb, ca];
 
-        let baseline_y = rect.y + rect.height * 0.8;
+        let baseline_y = (rect.y + rect.height * 0.8).round();
         let mut cursor_x = rect.x;
 
         for info in &glyphs {
@@ -730,14 +834,14 @@ impl DisplayRenderer {
                 ) {
                     Some(uv) => uv,
                     None => {
-                        cursor_x += info.adv_x;
+                        cursor_x = (cursor_x + info.adv_x).round();
                         continue;
                     }
                 },
             };
 
-            let gx = cursor_x + info.br_x;
-            let gy = baseline_y - info.br_y;
+            let gx = (cursor_x + info.br_x).round();
+            let gy = (baseline_y - info.br_y).round();
 
             let ndc_left = -1.0 + 2.0 * gx / self.width;
             let ndc_right = -1.0 + 2.0 * (gx + info.bm_width as f32) / self.width;
@@ -775,7 +879,7 @@ impl DisplayRenderer {
                 color: color_arr,
             });
 
-            cursor_x += info.adv_x;
+            cursor_x = (cursor_x + info.adv_x).round();
         }
     }
 
