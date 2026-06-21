@@ -459,6 +459,27 @@ fn collect_inline<'a>(node: &'a RenderNode, out: &mut Vec<&'a RenderNode>) {
     }
 }
 
+fn split_words(text: &str, style: &ComputedValues) -> Vec<(String, f32)> {
+    let space_w = estimate_text_width(" ", style.font_size);
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
+        // whitespace-only node → single space token
+        return vec![(String::from(" "), space_w)];
+    }
+    let mut out = Vec::with_capacity(words.len() * 2 - 1);
+    for (i, w) in words.iter().enumerate() {
+        if i > 0 || text.starts_with(' ') || text.starts_with('\t') || text.starts_with('\n') {
+            out.push((String::from(" "), space_w));
+        }
+        let w_w = estimate_text_width(w, style.font_size);
+        out.push((w.to_string(), w_w));
+    }
+    if text.ends_with(' ') || text.ends_with('\t') || text.ends_with('\n') {
+        out.push((String::from(" "), space_w));
+    }
+    out
+}
+
 fn layout_inlines(items: Vec<InlineItem>, containing: &Rect, cursor: &mut Vec2, floats: &mut Vec<FloatBox>) -> Vec<LayoutBox> {
     if items.is_empty() {
         return vec![];
@@ -469,18 +490,38 @@ fn layout_inlines(items: Vec<InlineItem>, containing: &Rect, cursor: &mut Vec2, 
     let mut y = cursor.y;
 
     for item in items {
-        let w = match &item {
-            InlineItem::Text(text, style) => estimate_text_width(text, style.font_size),
-            InlineItem::InlineBlock(b) => b.rect.width,
-        };
-        let line_w: f32 = line_items.iter().map(|(_, iw)| iw).sum();
-        let avail = available_inline_width(containing.x, containing.x + containing.width, y, floats);
+        match item {
+            InlineItem::Text(text, style) => {
+                let words = split_words(&text, &style);
+                for (word_text, word_w) in &words {
+                    let line_w: f32 = line_items.iter().map(|(_, iw)| iw).sum();
+                    let avail = available_inline_width(containing.x, containing.x + containing.width, y, floats);
 
-        if line_w > 0.0 && line_w + w > avail {
-            y = flush_line(&mut result, &mut line_items, containing.x, y);
+                    // If this word doesn't fit and we already have content on the line, wrap
+                    if line_w > 0.0 && line_w + word_w > avail {
+                        y = flush_line(&mut result, &mut line_items, containing.x, y);
+                    }
+
+                    // Don't start a line with a space
+                    if line_items.is_empty() && word_text == " " {
+                        continue;
+                    }
+
+                    line_items.push((InlineItem::Text(word_text.clone(), style.clone()), *word_w));
+                }
+            }
+            InlineItem::InlineBlock(b) => {
+                let w = b.rect.width;
+                let line_w: f32 = line_items.iter().map(|(_, iw)| iw).sum();
+                let avail = available_inline_width(containing.x, containing.x + containing.width, y, floats);
+
+                if line_w > 0.0 && line_w + w > avail {
+                    y = flush_line(&mut result, &mut line_items, containing.x, y);
+                }
+
+                line_items.push((InlineItem::InlineBlock(b), w));
+            }
         }
-
-        line_items.push((item, w));
     }
 
     if !line_items.is_empty() {
@@ -806,17 +847,18 @@ mod tests {
         let engine = BlockLayout;
         let boxes = engine.layout(&root, size(800.0, 600.0));
         assert_eq!(boxes.len(), 1);
-        // inline-block is a child of div
         let children = &boxes[0].children;
-        // div has 3 inline items: text, inline-block, text
-        // They all go through layout_inlines so become direct children
-        assert_eq!(children.len(), 3);
-        assert_eq!(children[0].tag, "#text");
-        assert_eq!(children[1].tag, "span");
-        assert_eq!(children[2].tag, "#text");
-        // inline-block should have its own children
-        assert_eq!(children[1].children.len(), 1);
-        assert_eq!(children[1].children[0].text, "inline-block");
+        // inline-block uses full width (auto), doesn't fit on line 1, sits on its own line
+        // "before " → ["before", " "] (line 1)
+        // span → own line (line 2, full width)
+        // " after" → leading space skipped, "after" (line 3)
+        assert_eq!(children.len(), 4);
+        assert_eq!(children[0].text, "before");
+        assert_eq!(children[1].text, " ");
+        assert_eq!(children[2].tag, "span");
+        assert_eq!(children[3].text, "after");
+        assert_eq!(children[2].children.len(), 1);
+        assert_eq!(children[2].children[0].text, "inline-block");
     }
 
     #[test]
@@ -828,11 +870,41 @@ mod tests {
         let boxes = engine.layout(&root, size(800.0, 600.0));
         assert_eq!(boxes.len(), 1);
         let children = &boxes[0].children;
-        assert_eq!(children.len(), 1);
-        // text box should have baseline-based y positioning
-        assert!(children[0].rect.y >= 0.0);
-        assert!(children[0].rect.width > 0.0);
-        assert!(children[0].rect.height > 0.0);
+        // "Hello", " ", "World" — word-level split
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].text, "Hello");
+        assert_eq!(children[1].text, " ");
+        assert_eq!(children[2].text, "World");
+        // all on same line → same y
+        assert_eq!(children[0].rect.y, children[1].rect.y);
+        assert_eq!(children[1].rect.y, children[2].rect.y);
+        // consecutive x positions
+        assert!(children[0].rect.x < children[1].rect.x);
+        assert!(children[1].rect.x < children[2].rect.x);
     }
 
+    #[test]
+    fn test_word_wrapping() {
+        let root = make_render("div", base_style(), vec![
+            make_text("one two three", base_style()),
+        ]);
+        let engine = BlockLayout;
+        // Narrow — only one word fits per line
+        let boxes = engine.layout(&root, size(50.0, 600.0));
+        let children = &boxes[0].children;
+        // Each word on its own line + trailing space = "one", " ", "two", " ", "three"
+        assert_eq!(children.len(), 5);
+        assert_eq!(children[0].text, "one");
+        assert_eq!(children[1].text, " ");
+        assert_eq!(children[2].text, "two");
+        assert_eq!(children[3].text, " ");
+        assert_eq!(children[4].text, "three");
+        // Each word starts at x=0 (line start)
+        assert_eq!(children[0].rect.x, 0.0);
+        assert_eq!(children[2].rect.x, 0.0);
+        assert_eq!(children[4].rect.x, 0.0);
+        // Each subsequent word is on a new line
+        assert!(children[2].rect.y > children[0].rect.y);
+        assert!(children[4].rect.y > children[2].rect.y);
+    }
 }
