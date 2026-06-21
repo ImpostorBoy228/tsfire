@@ -14,7 +14,9 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    steps:
+    steps: 
+    - name: freetype
+      run: sudo apt-get update && sudo apt-get install -y libfreetype6-dev fonts-noto
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build
