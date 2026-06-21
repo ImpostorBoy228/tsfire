@@ -13,7 +13,7 @@ pub struct CpuRenderer {
     pub height: u32,
     font: Option<FontHandle>,
     clip_stack: Vec<layout::Rect>,
-    global_alpha: f32,
+    opacity_stack: Vec<f32>,
 }
 
 fn load_font() -> Option<FontHandle> {
@@ -40,22 +40,35 @@ impl CpuRenderer {
     pub fn new(width: u32, height: u32) -> Self {
         let buffer = vec![0xFFFFFFFF; (width * height) as usize];
         let font = load_font();
-        CpuRenderer { buffer, width, height, font, clip_stack: Vec::new(), global_alpha: 1.0 }
+        CpuRenderer { buffer, width, height, font, clip_stack: Vec::new(), opacity_stack: Vec::new() }
     }
 
     fn clip_intersect(rect: &layout::Rect, clip_stack: &[layout::Rect]) -> Option<layout::Rect> {
-        if clip_stack.is_empty() {
-            return Some(*rect);
+        let mut r = *rect;
+        for clip in clip_stack {
+            let x1 = r.x.max(clip.x);
+            let y1 = r.y.max(clip.y);
+            let x2 = (r.x + r.width).min(clip.x + clip.width);
+            let y2 = (r.y + r.height).min(clip.y + clip.height);
+            if x1 >= x2 || y1 >= y2 {
+                return None;
+            }
+            r = layout::Rect { x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
         }
-        let clip = clip_stack.last().unwrap();
-        let x1 = rect.x.max(clip.x);
-        let y1 = rect.y.max(clip.y);
-        let x2 = (rect.x + rect.width).min(clip.x + clip.width);
-        let y2 = (rect.y + rect.height).min(clip.y + clip.height);
-        if x1 >= x2 || y1 >= y2 {
-            return None;
+        Some(r)
+    }
+
+    fn is_point_clipped(&self, px: f32, py: f32) -> bool {
+        for clip in &self.clip_stack {
+            if px < clip.x || px >= clip.x + clip.width || py < clip.y || py >= clip.y + clip.height {
+                return true;
+            }
         }
-        Some(layout::Rect { x: x1, y: y1, width: x2 - x1, height: y2 - y1 })
+        false
+    }
+
+    fn effective_alpha(&self) -> f32 {
+        self.opacity_stack.last().copied().unwrap_or(1.0)
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -93,7 +106,7 @@ impl CpuRenderer {
                 }
             }
             DisplayCommand::DrawBoxShadow(r, c, _ox, _oy, _bl) => {
-                let alpha = (c.3 as f32 * 0.5 * self.global_alpha).min(255.0) as u8;
+                let alpha = (c.3 as f32 * 0.5 * self.effective_alpha()).min(255.0) as u8;
                 let sc = Color(c.0, c.1, c.2, alpha);
                 self.fill_rect_clipped(r, &sc);
             }
@@ -103,20 +116,31 @@ impl CpuRenderer {
                 }
             }
             DisplayCommand::TextRun(r, c, _fz, _ff, range) => {
-                let ca = Color(c.0, c.1, c.2, (c.3 as f32 * self.global_alpha).min(255.0) as u8);
+                let ca = Color(c.0, c.1, c.2, (c.3 as f32 * self.effective_alpha()).min(255.0) as u8);
                 self.text_run(r, &ca, range, text_arena);
             }
             DisplayCommand::SetClip(rect) => {
-                self.clip_stack.push(*rect);
+                let effective = match self.clip_stack.last() {
+                    Some(top) => {
+                        let x1 = rect.x.max(top.x);
+                        let y1 = rect.y.max(top.y);
+                        let x2 = (rect.x + rect.width).min(top.x + top.width);
+                        let y2 = (rect.y + rect.height).min(top.y + top.height);
+                        layout::Rect { x: x1, y: y1, width: (x2 - x1).max(0.0), height: (y2 - y1).max(0.0) }
+                    }
+                    None => *rect,
+                };
+                self.clip_stack.push(effective);
             }
             DisplayCommand::PopClip => {
                 self.clip_stack.pop();
             }
             DisplayCommand::SetOpacity(val) => {
-                self.global_alpha = *val;
+                let parent = self.opacity_stack.last().copied().unwrap_or(1.0);
+                self.opacity_stack.push(parent * *val);
             }
             DisplayCommand::PopOpacity => {
-                self.global_alpha = 1.0;
+                self.opacity_stack.pop();
             }
         }
     }
@@ -263,13 +287,8 @@ impl CpuRenderer {
                     if sx < 0 || sx as u32 >= self.width {
                         continue;
                     }
-                    // clip check
-                    if let Some(cr) = self.clip_stack.last() {
-                        let px = sx as f32;
-                        let py = sy as f32;
-                        if px < cr.x || px >= cr.x + cr.width || py < cr.y || py >= cr.y + cr.height {
-                            continue;
-                        }
+                    if self.is_point_clipped(sx as f32, sy as f32) {
+                        continue;
                     }
                     let cov = bitmap[(info.bm_offset as usize) + row as usize * pitch + col as usize] as u32;
                     if cov == 0 {
