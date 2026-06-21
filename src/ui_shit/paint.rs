@@ -1,5 +1,5 @@
 use crate::ui_shit::layout::{LayoutBox, Rect, Size};
-use crate::parsing::{Color, Display, BorderStyle as ParsedBorderStyle, Overflow, ComputedValues};
+use crate::parsing::{Color, Display, BorderStyle as ParsedBorderStyle};
 
 // --- Data types ---
 
@@ -145,13 +145,10 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
     }
 
     // 6. positioned children (painted above normal flow)
-    for _child in &box_.positioned_children {
-        let (neg_p, zero_p, pos_p) = partition_by_z_index(&box_.positioned_children);
-        for c in &neg_p { paint_box(c, items, text_arena); }
-        for c in &zero_p { paint_box(c, items, text_arena); }
-        for c in &pos_p { paint_box(c, items, text_arena); }
-        break;
-    }
+    let (neg_p, zero_p, pos_p) = partition_by_z_index(&box_.positioned_children);
+    for c in &neg_p { paint_box(c, items, text_arena); }
+    for c in &zero_p { paint_box(c, items, text_arena); }
+    for c in &pos_p { paint_box(c, items, text_arena); }
 
     // 7. text
     if box_.tag == "#text" && !box_.text.is_empty() {
@@ -227,9 +224,6 @@ fn partition_by_z_index(children: &[LayoutBox]) -> (Vec<&LayoutBox>, Vec<&Layout
     (neg, zero, pos)
 }
 
-fn detect_border_width(_box_: &LayoutBox) -> f32 { 0.0 }
-fn detect_border_color(_box_: &LayoutBox) -> Color { Color(0, 0, 0, 255) }
-
 // --- Dump ---
 
 pub fn dump_display_list(list: &DisplayList) {
@@ -272,6 +266,7 @@ pub fn dump_display_list(list: &DisplayList) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsing::{ComputedValues, Overflow};
     use crate::ui_shit::layout::LayoutBox;
 
     fn make_layout(tag: &str, style: ComputedValues, children: Vec<LayoutBox>) -> LayoutBox {

@@ -148,7 +148,7 @@ int font_fill_glyphs(void *font,
         if (error) return -1;
 
         FT_GlyphSlot slot = face->glyph;
-        total_bytes += (size_t)slot->bitmap.rows * slot->bitmap.pitch;
+        total_bytes += (size_t)slot->bitmap.rows * (size_t)slot->bitmap.pitch;
         glyph_count++;
         first = 0;
     }
@@ -201,7 +201,7 @@ int font_fill_glyphs(void *font,
         }
 
         // Копируем bitmap в общий буфер
-        int bm_bytes = slot->bitmap.rows * slot->bitmap.pitch;
+        size_t bm_bytes = (size_t)slot->bitmap.rows * (size_t)slot->bitmap.pitch;
         if (bm_bytes > 0 && bitmap_buf) {
             memcpy(bitmap_buf + byte_offset, slot->bitmap.buffer, bm_bytes);
         }

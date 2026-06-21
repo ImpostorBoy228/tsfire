@@ -123,7 +123,7 @@ fn layout_children(
                 let box_ = layout_block(node, containing, cb, cursor, floats);
                 out.push(box_);
             }
-            Display::Inline | _ => {
+            _ => {
                 let mut inline_children = Vec::new();
                 collect_inline(node, &mut inline_children);
                 let boxes = layout_inlines(&inline_children, containing, cursor, floats);
@@ -428,16 +428,17 @@ fn flush_inlines<'a>(batch: &mut Vec<&'a RenderNode>, children: &mut Vec<LayoutB
 
 fn available_inline_width(container_left: f32, container_right: f32, y: f32, floats: &[FloatBox]) -> f32 {
     let mut left = container_left;
+    let mut right = container_right;
     for f in floats {
         if y >= f.rect.y && y < f.rect.y + f.rect.height {
             match f.float {
                 Float::Left => left = left.max(f.rect.x + f.rect.width),
-                Float::Right => return (container_right - left).max(0.0),
+                Float::Right => right = right.min(f.rect.x),
                 _ => {}
             }
         }
     }
-    (container_right - left).max(0.0)
+    (right - left).max(0.0)
 }
 
 // --- Font ---

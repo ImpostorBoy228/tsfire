@@ -720,8 +720,6 @@ impl DisplayRenderer {
         }
     }
 
-    fn add_draw_image() {}
-
     pub fn resize(&mut self, width: u32, height: u32) {
         self.width = width as f32;
         self.height = height as f32;

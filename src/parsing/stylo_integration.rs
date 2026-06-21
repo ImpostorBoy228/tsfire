@@ -517,10 +517,6 @@ fn au_to_px(au: &app_units::Au) -> f32 {
     au.to_f32_px()
 }
 
-fn to_our_px_from_len(len: &Length) -> Option<f32> {
-    Some(len.px())
-}
-
 fn to_our_border_style(s: BorderStyle) -> crate::parsing::BorderStyle {
     match s {
         BorderStyle::None => crate::parsing::BorderStyle::None,
