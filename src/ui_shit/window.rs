@@ -195,7 +195,8 @@ impl App {
         if let Some(tree) = &self.render_tree {
             let engine = layout::BlockLayout;
             let boxes = engine.layout(tree, layout::Size { width, height });
-            let dl = paint::build_display_list(&boxes, self.decoded_images.clone(), &self.image_map);
+            let dl =
+                paint::build_display_list(&boxes, self.decoded_images.clone(), &self.image_map);
             self.display_list = Some(dl);
         } else {
             self.display_list = None;
@@ -275,8 +276,12 @@ impl ApplicationHandler for App {
     }
 }
 
-pub fn run(tree: Option<RenderNode>, decoded_images: Vec<paint::DecodedImage>, image_map: HashMap<String, u32>) -> Result<(), Box<dyn std::error::Error>> {
-    let event_loop = EventLoop::new()?;
+pub fn run(
+    tree: Option<RenderNode>,
+    decoded_images: Vec<paint::DecodedImage>,
+    image_map: HashMap<String, u32>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let event_zaloop = EventLoop::new()?;
     let mut app = App {
         state: None,
         display_list: None,
@@ -284,6 +289,6 @@ pub fn run(tree: Option<RenderNode>, decoded_images: Vec<paint::DecodedImage>, i
         decoded_images,
         image_map,
     };
-    event_loop.run_app(&mut app)?;
+    event_zaloop.run_app(&mut app)?;
     Ok(())
 }
