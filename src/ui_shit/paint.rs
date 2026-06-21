@@ -51,6 +51,7 @@ pub enum DisplayCommand {
     DrawImage(Rect, ImageIndex),
     TextRun(Rect, Color, f32, FontFamily, TextRange),
     Border(Rect, [BorderSide; 4]),
+    DrawBoxShadow(Rect, Color, f32, f32, f32), // rect, color, offset_x, offset_y, blur
     SetClip(Rect),
     PopClip,
     SetOpacity(f32),
@@ -97,7 +98,19 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
         items.push(DisplayCommand::SetOpacity(box_.style.opacity));
     }
 
-    // 1. background fill / gradient
+    // 1. box-shadow (drawn behind background)
+    for shadow in &box_.style.box_shadow {
+        let sx = box_.rect.x + shadow.offset_x;
+        let sy = box_.rect.y + shadow.offset_y;
+        let sw = box_.rect.width;
+        let sh = box_.rect.height;
+        items.push(DisplayCommand::DrawBoxShadow(
+            Rect { x: sx, y: sy, width: sw, height: sh },
+            shadow.color, shadow.offset_x, shadow.offset_y, shadow.blur,
+        ));
+    }
+
+    // 2. background fill / gradient
     if let Some(bi) = box_.style.background_image.first() {
         match bi {
             crate::parsing::BackgroundImage::Gradient { from, to, vertical } => {
@@ -163,7 +176,48 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
         ));
     }
 
-    // 8. border
+    // 8. text-decoration (underline, overline, line-through)
+    {
+        let td = &box_.style.text_decoration_line;
+        let tc = box_.style.text_decoration_color;
+        if td.underline {
+            let y = box_.rect.y + box_.rect.height - 1.0;
+            items.push(DisplayCommand::FillRect(
+                Rect { x: box_.rect.x, y, width: box_.rect.width, height: 1.0 },
+                tc,
+            ));
+        }
+        if td.overline {
+            items.push(DisplayCommand::FillRect(
+                Rect { x: box_.rect.x, y: box_.rect.y, width: box_.rect.width, height: 1.0 },
+                tc,
+            ));
+        }
+        if td.line_through {
+            let y = box_.rect.y + box_.rect.height * 0.4;
+            items.push(DisplayCommand::FillRect(
+                Rect { x: box_.rect.x, y, width: box_.rect.width, height: 1.0 },
+                tc,
+            ));
+        }
+    }
+
+    // 9. outline
+    if box_.style.outline_width > 0.0 && box_.style.outline_style != ParsedBorderStyle::None {
+        let ow = box_.style.outline_width;
+        let oc = box_.style.outline_color;
+        let r = box_.rect;
+        // top
+        items.push(DisplayCommand::FillRect(Rect { x: r.x - ow, y: r.y - ow, width: r.width + 2.0 * ow, height: ow }, oc));
+        // bottom
+        items.push(DisplayCommand::FillRect(Rect { x: r.x - ow, y: r.y + r.height, width: r.width + 2.0 * ow, height: ow }, oc));
+        // left
+        items.push(DisplayCommand::FillRect(Rect { x: r.x - ow, y: r.y, width: ow, height: r.height }, oc));
+        // right
+        items.push(DisplayCommand::FillRect(Rect { x: r.x + r.width, y: r.y, width: ow, height: r.height }, oc));
+    }
+
+    // 10. border
     let sides = extract_border(box_);
     if has_visible_border(&sides) {
         items.push(DisplayCommand::Border(box_.rect, sides));
@@ -257,6 +311,9 @@ pub fn dump_display_list(list: &DisplayList) {
                 println!("  {:4}. SetOpacity  {}", i, v),
             DisplayCommand::PopOpacity =>
                 println!("  {:4}. PopOpacity", i),
+            DisplayCommand::DrawBoxShadow(r, c, ox, oy, bl) =>
+                println!("  {:4}. BoxShadow  ({:>8.1},{:>4.1} {:>6.1}x{:<4.1}) off({},{}) blur{} #{:02x}{:02x}{:02x}",
+                    i, r.x, r.y, r.width, r.height, ox, oy, bl, c.0, c.1, c.2),
         }
     }
 }
@@ -298,6 +355,7 @@ mod tests {
                 DisplayCommand::PopClip => "PopClip",
                 DisplayCommand::SetOpacity(..) => "SetOpacity",
                 DisplayCommand::PopOpacity => "PopOpacity",
+                DisplayCommand::DrawBoxShadow(..) => "BoxShadow",
             }
         }).collect()
     }
