@@ -38,7 +38,7 @@ struct FloatBox {
 
 // --- Layout box ---
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LayoutBox {
     pub tag: String,
     pub text: String,
@@ -123,11 +123,21 @@ fn layout_children(
                 let box_ = layout_block(node, containing, cb, cursor, floats);
                 out.push(box_);
             }
-            _ => {
+            Display::Inline => {
                 let mut inline_children = Vec::new();
                 collect_inline(node, &mut inline_children);
-                let boxes = layout_inlines(&inline_children, containing, cursor, floats);
+                let items: Vec<InlineItem> = inline_children.into_iter().map(|n| InlineItem::Text(n.text.clone(), n.style.clone())).collect();
+                let boxes = layout_inlines(items, containing, cursor, floats);
                 out.extend(boxes);
+            }
+            Display::InlineBlock => {
+                let mut ib_cursor = Vec2 { x: containing.x, y: cursor.y };
+                let ib_box = layout_block(node, containing, cb, &mut ib_cursor, floats);
+                out.push(ib_box);
+            }
+            _ => {
+                let box_ = layout_block(node, containing, cb, cursor, floats);
+                out.push(box_);
             }
         }
     } else {
@@ -180,11 +190,20 @@ fn layout_positioned(node: &RenderNode, _containing: &Rect, cb: &CbContext) -> L
             positioned.push(pc);
             continue;
         }
-        if child.tag == "#text" || child.style.display == Display::Inline || is_floating(&child.style) {
+        if child.tag == "#text" {
+            let items = vec![InlineItem::Text(child.text.clone(), child.style.clone())];
+            let ib = layout_inlines(items, &child_cb.rect, &mut child_cursor, &mut floats);
+            children.extend(ib);
+        } else if child.style.display == Display::Inline || is_floating(&child.style) {
             let mut inline_collected = Vec::new();
             collect_inline(child, &mut inline_collected);
-            let ib = layout_inlines(&inline_collected, &child_cb.rect, &mut child_cursor, &mut floats);
+            let items: Vec<InlineItem> = inline_collected.into_iter().map(|n| InlineItem::Text(n.text.clone(), n.style.clone())).collect();
+            let ib = layout_inlines(items, &child_cb.rect, &mut child_cursor, &mut floats);
             children.extend(ib);
+        } else if child.style.display == Display::InlineBlock {
+            let mut ib_cursor = Vec2 { x: child_cb.rect.x, y: child_cursor.y };
+            let ib_box = layout_block(child, &child_cb.rect, &child_cb, &mut ib_cursor, &mut floats);
+            children.push(ib_box);
         } else if child.style.display == Display::Block {
             let cb = layout_block(child, &child_cb.rect, &child_cb, &mut child_cursor, &mut floats);
             children.push(cb);
@@ -264,11 +283,20 @@ fn layout_float(node: &RenderNode, containing: &Rect, cb: &CbContext, cursor: &m
     let content_rect = Rect { x: content_x, y: content_y, width: inner_w, height: 0.0 };
 
     for child in &node.children {
-        if child.tag == "#text" || child.style.display == Display::Inline {
+        if child.tag == "#text" {
+            let items = vec![InlineItem::Text(child.text.clone(), child.style.clone())];
+            let ib = layout_inlines(items, &content_rect, &mut child_cursor, floats);
+            children.extend(ib);
+        } else if child.style.display == Display::Inline {
             let mut inline_collected = Vec::new();
             collect_inline(child, &mut inline_collected);
-            let ib = layout_inlines(&inline_collected, &content_rect, &mut child_cursor, floats);
+            let items: Vec<InlineItem> = inline_collected.into_iter().map(|n| InlineItem::Text(n.text.clone(), n.style.clone())).collect();
+            let ib = layout_inlines(items, &content_rect, &mut child_cursor, floats);
             children.extend(ib);
+        } else if child.style.display == Display::InlineBlock {
+            let mut ib_cursor = Vec2 { x: content_rect.x, y: child_cursor.y };
+            let ib_box = layout_block(child, &content_rect, cb, &mut ib_cursor, floats);
+            children.push(ib_box);
         } else if child.style.display == Display::Block {
             let cb = layout_block(child, &content_rect, cb, &mut child_cursor, floats);
             children.push(cb);
@@ -337,7 +365,7 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
     let mut children: Vec<LayoutBox> = Vec::new();
     let mut positioned: Vec<LayoutBox> = Vec::new();
     let mut child_cursor = Vec2 { x: content_x, y: content_y };
-    let mut inline_batch: Vec<&RenderNode> = Vec::new();
+    let mut inline_batch: Vec<InlineItem> = Vec::new();
     let content_rect = Rect { x: content_x, y: content_y, width: inner_w, height: 0.0 };
 
     let child_cb = if node.style.position != Position::Static {
@@ -358,7 +386,7 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
         }
 
         if child.tag == "#text" {
-            inline_batch.push(child);
+            inline_batch.push(InlineItem::Text(child.text.clone(), child.style.clone()));
             continue;
         }
 
@@ -368,10 +396,17 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
                 let cb = layout_block(child, &content_rect, &child_cb, &mut child_cursor, floats);
                 children.push(cb);
             }
+            Display::InlineBlock => {
+                let mut ib_cursor = Vec2 { x: content_rect.x, y: child_cursor.y };
+                let ib_box = layout_block(child, &content_rect, &child_cb, &mut ib_cursor, floats);
+                inline_batch.push(InlineItem::InlineBlock(ib_box));
+            }
             _ => {
                 let mut inline_collected = Vec::new();
                 collect_inline(child, &mut inline_collected);
-                inline_batch.extend(inline_collected);
+                for n in inline_collected {
+                    inline_batch.push(InlineItem::Text(n.text.clone(), n.style.clone()));
+                }
             }
         }
     }
@@ -408,6 +443,12 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
 
 // --- Inline layout ---
 
+#[derive(Debug)]
+enum InlineItem {
+    Text(String, ComputedValues),
+    InlineBlock(LayoutBox),
+}
+
 fn collect_inline<'a>(node: &'a RenderNode, out: &mut Vec<&'a RenderNode>) {
     if node.tag == "#text" {
         out.push(node);
@@ -418,40 +459,88 @@ fn collect_inline<'a>(node: &'a RenderNode, out: &mut Vec<&'a RenderNode>) {
     }
 }
 
-fn layout_inlines(nodes: &[&RenderNode], containing: &Rect, cursor: &mut Vec2, floats: &mut Vec<FloatBox>) -> Vec<LayoutBox> {
-    let mut boxes = Vec::new();
-    let mut line_x = containing.x;
+fn layout_inlines(items: Vec<InlineItem>, containing: &Rect, cursor: &mut Vec2, floats: &mut Vec<FloatBox>) -> Vec<LayoutBox> {
+    if items.is_empty() {
+        return vec![];
+    }
 
-    let available_width = available_inline_width(containing.x, containing.x + containing.width, cursor.y, floats);
+    let mut result = Vec::new();
+    let mut line_items: Vec<(InlineItem, f32)> = Vec::new();
+    let mut y = cursor.y;
 
-    for node in nodes {
-        if node.tag == "#text" {
-            let text_w = estimate_text_width(&node.text, node.style.font_size);
-            if line_x + text_w > available_width && line_x > containing.x {
-                cursor.y += node.style.font_size * 1.2;
-                line_x = containing.x;
+    for item in items {
+        let w = match &item {
+            InlineItem::Text(text, style) => estimate_text_width(text, style.font_size),
+            InlineItem::InlineBlock(b) => b.rect.width,
+        };
+        let line_w: f32 = line_items.iter().map(|(_, iw)| iw).sum();
+        let avail = available_inline_width(containing.x, containing.x + containing.width, y, floats);
+
+        if line_w > 0.0 && line_w + w > avail {
+            y = flush_line(&mut result, &mut line_items, containing.x, y);
+        }
+
+        line_items.push((item, w));
+    }
+
+    if !line_items.is_empty() {
+        flush_line(&mut result, &mut line_items, containing.x, y);
+    }
+
+    cursor.y = y;
+    result
+}
+
+fn flush_line(result: &mut Vec<LayoutBox>, line: &mut Vec<(InlineItem, f32)>, origin_x: f32, y: f32) -> f32 {
+    if line.is_empty() { return y; }
+
+    // First pass: compute baseline offsets
+    let mut max_above = 0.0f32;
+    let mut max_below = 0.0f32;
+    let mut boxes: Vec<LayoutBox> = Vec::with_capacity(line.len());
+    let mut baseline_offsets: Vec<f32> = Vec::with_capacity(line.len());
+
+    for (item, _) in line.iter() {
+        match item {
+            InlineItem::Text(text, style) => {
+                let text_w = estimate_text_width(text, style.font_size);
+                let box_h = style.font_size * 1.2;
+                let above = box_h * 0.8;
+                boxes.push(LayoutBox::new("#text".into(), text.clone(), style.clone(), Rect { x: 0.0, y: 0.0, width: text_w, height: box_h }));
+                baseline_offsets.push(above);
+                max_above = max_above.max(above);
+                max_below = max_below.max(box_h - above);
             }
-            boxes.push(LayoutBox::new(
-                "#text".into(),
-                node.text.clone(),
-                node.style.clone(),
-                Rect { x: line_x, y: cursor.y, width: text_w, height: node.style.font_size * 1.2 },
-            ));
-            line_x += text_w;
+            InlineItem::InlineBlock(b) => {
+                let above = b.rect.height;
+                boxes.push(b.clone());
+                baseline_offsets.push(above);
+                max_above = max_above.max(above);
+                // inline-block baseline at bottom
+            }
         }
     }
 
-    if !nodes.is_empty() {
-        cursor.y += nodes.last().unwrap().style.font_size * 1.2;
+    let line_height = (max_above + max_below).max(10.0);
+    let baseline_y = y + max_above;
+
+    // Second pass: position and output
+    let mut x = origin_x;
+    for (_i, (bx, bo)) in boxes.iter_mut().zip(baseline_offsets.iter()).enumerate() {
+        bx.rect.x = x;
+        bx.rect.y = baseline_y - bo;
+        x += bx.rect.width;
+        result.push(std::mem::replace(bx, LayoutBox::new(String::new(), String::new(), ComputedValues::default(), Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 })));
     }
 
-    boxes
+    line.clear();
+    y + line_height
 }
 
-fn flush_inlines<'a>(batch: &mut Vec<&'a RenderNode>, children: &mut Vec<LayoutBox>, content_rect: &Rect, cursor: &mut Vec2, floats: &mut Vec<FloatBox>) {
+fn flush_inlines(batch: &mut Vec<InlineItem>, children: &mut Vec<LayoutBox>, content_rect: &Rect, cursor: &mut Vec2, floats: &mut Vec<FloatBox>) {
     if !batch.is_empty() {
-        let nodes: Vec<&RenderNode> = batch.drain(..).collect();
-        let lbs = layout_inlines(&nodes, content_rect, cursor, floats);
+        let items: Vec<InlineItem> = batch.drain(..).collect();
+        let lbs = layout_inlines(items, content_rect, cursor, floats);
         children.extend(lbs);
     }
 }
@@ -701,4 +790,49 @@ mod tests {
         assert_eq!(boxes[0].rect.x, 0.0);
         assert_eq!(boxes[0].rect.y, 0.0);
     }
+
+    #[test]
+    fn test_inline_block() {
+        let mut ib_style = base_style();
+        ib_style.display = Display::InlineBlock;
+        ib_style.width = Length::Px(100.0);
+        ib_style.height = Length::Px(50.0);
+
+        let root = make_render("div", base_style(), vec![
+            make_text("before ", base_style()),
+            make_render("span", ib_style, vec![make_text("inline-block", base_style())]),
+            make_text(" after", base_style()),
+        ]);
+        let engine = BlockLayout;
+        let boxes = engine.layout(&root, size(800.0, 600.0));
+        assert_eq!(boxes.len(), 1);
+        // inline-block is a child of div
+        let children = &boxes[0].children;
+        // div has 3 inline items: text, inline-block, text
+        // They all go through layout_inlines so become direct children
+        assert_eq!(children.len(), 3);
+        assert_eq!(children[0].tag, "#text");
+        assert_eq!(children[1].tag, "span");
+        assert_eq!(children[2].tag, "#text");
+        // inline-block should have its own children
+        assert_eq!(children[1].children.len(), 1);
+        assert_eq!(children[1].children[0].text, "inline-block");
+    }
+
+    #[test]
+    fn test_baseline_alignment() {
+        let root = make_render("div", base_style(), vec![
+            make_text("Hello World", base_style()),
+        ]);
+        let engine = BlockLayout;
+        let boxes = engine.layout(&root, size(800.0, 600.0));
+        assert_eq!(boxes.len(), 1);
+        let children = &boxes[0].children;
+        assert_eq!(children.len(), 1);
+        // text box should have baseline-based y positioning
+        assert!(children[0].rect.y >= 0.0);
+        assert!(children[0].rect.width > 0.0);
+        assert!(children[0].rect.height > 0.0);
+    }
+
 }
