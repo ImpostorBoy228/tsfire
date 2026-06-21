@@ -122,7 +122,8 @@ fn layout_children(
     if !is_floating(&node.style) {
         match node.style.display {
             Display::Block => {
-                let box_ = layout_block(node, containing, cb, cursor, floats);
+                let mut prev_margin = 0.0;
+                let box_ = layout_block(node, containing, cb, cursor, floats, &mut prev_margin);
                 out.push(box_);
             }
             Display::Inline => {
@@ -134,11 +135,13 @@ fn layout_children(
             }
             Display::InlineBlock => {
                 let mut ib_cursor = Vec2 { x: containing.x, y: cursor.y };
-                let ib_box = layout_block(node, containing, cb, &mut ib_cursor, floats);
+                let mut zero_margin = 0.0;
+                let ib_box = layout_block(node, containing, cb, &mut ib_cursor, floats, &mut zero_margin);
                 out.push(ib_box);
             }
             _ => {
-                let box_ = layout_block(node, containing, cb, cursor, floats);
+                let mut prev_margin = 0.0;
+                let box_ = layout_block(node, containing, cb, cursor, floats, &mut prev_margin);
                 out.push(box_);
             }
         }
@@ -185,6 +188,7 @@ fn layout_positioned(node: &RenderNode, _containing: &Rect, cb: &CbContext) -> L
     let mut positioned = Vec::new();
     let mut floats = Vec::new();
     let mut child_cursor = Vec2 { x: 0.0, y: 0.0 };
+    let mut child_prev_margin = 0.0;
 
     for child in &node.children {
         if child.style.position == Position::Absolute || child.style.position == Position::Fixed {
@@ -204,10 +208,11 @@ fn layout_positioned(node: &RenderNode, _containing: &Rect, cb: &CbContext) -> L
             children.extend(ib);
         } else if child.style.display == Display::InlineBlock {
             let mut ib_cursor = Vec2 { x: child_cb.rect.x, y: child_cursor.y };
-            let ib_box = layout_block(child, &child_cb.rect, &child_cb, &mut ib_cursor, &mut floats);
+            let mut zero_margin = 0.0;
+            let ib_box = layout_block(child, &child_cb.rect, &child_cb, &mut ib_cursor, &mut floats, &mut zero_margin);
             children.push(ib_box);
         } else if child.style.display == Display::Block {
-            let cb = layout_block(child, &child_cb.rect, &child_cb, &mut child_cursor, &mut floats);
+            let cb = layout_block(child, &child_cb.rect, &child_cb, &mut child_cursor, &mut floats, &mut child_prev_margin);
             children.push(cb);
         }
     }
@@ -284,6 +289,7 @@ fn layout_float(node: &RenderNode, containing: &Rect, cb: &CbContext, cursor: &m
     let mut children = Vec::new();
     let mut child_cursor = Vec2 { x: content_x, y: content_y };
     let content_rect = Rect { x: content_x, y: content_y, width: inner_w, height: 0.0 };
+    let mut child_prev_margin = 0.0;
 
     for child in &node.children {
         if child.tag == "#text" {
@@ -298,10 +304,11 @@ fn layout_float(node: &RenderNode, containing: &Rect, cb: &CbContext, cursor: &m
             children.extend(ib);
         } else if child.style.display == Display::InlineBlock {
             let mut ib_cursor = Vec2 { x: content_rect.x, y: child_cursor.y };
-            let ib_box = layout_block(child, &content_rect, cb, &mut ib_cursor, floats);
+            let mut zero_margin = 0.0;
+            let ib_box = layout_block(child, &content_rect, cb, &mut ib_cursor, floats, &mut zero_margin);
             children.push(ib_box);
         } else if child.style.display == Display::Block {
-            let cb = layout_block(child, &content_rect, cb, &mut child_cursor, floats);
+            let cb = layout_block(child, &content_rect, cb, &mut child_cursor, floats, &mut child_prev_margin);
             children.push(cb);
         }
     }
@@ -324,11 +331,15 @@ fn layout_float(node: &RenderNode, containing: &Rect, cb: &CbContext, cursor: &m
 
 // --- Block layout ---
 
-fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &mut Vec2, floats: &mut Vec<FloatBox>) -> LayoutBox {
+fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &mut Vec2, floats: &mut Vec<FloatBox>, prev_margin: &mut f32) -> LayoutBox {
     let m_t = resolve_length(&node.style.margin_top, containing.width);
     let mut m_r = resolve_length(&node.style.margin_right, containing.width);
     let m_b = resolve_length(&node.style.margin_bottom, containing.width);
     let mut m_l = resolve_length(&node.style.margin_left, containing.width);
+
+    let gap = m_t.max(*prev_margin);
+    *prev_margin = 0.0;
+    cursor.y += gap;
 
     let p_t = resolve_length(&node.style.padding_top, containing.width);
     let p_r = resolve_length(&node.style.padding_right, containing.width);
@@ -338,7 +349,6 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
     let w = resolve_length(&node.style.width, containing.width);
     let h = resolve_length(&node.style.height, containing.width);
 
-    // auto margins: distribute surplus space
     let avail = containing.width;
     if node.style.margin_left == crate::parsing::Length::Auto && node.style.margin_right == crate::parsing::Length::Auto {
         if w > 0.0 && w < avail {
@@ -362,7 +372,7 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
     let inner_w = if w > 0.0 { w - p_l - p_r } else { content_w - p_l - p_r };
 
     let x = containing.x + m_l;
-    let y = cursor.y + m_t;
+    let y = cursor.y;
 
     let content_x = x + p_l;
     let content_y = y + p_t;
@@ -378,6 +388,8 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
     } else {
         CbContext { rect: content_rect, is_positioned: false }
     };
+
+    let mut child_prev_margin = 0.0f32;
 
     for child in &node.children {
         match child.style.position {
@@ -398,12 +410,13 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
         match &child.style.display {
             Display::Block => {
                 flush_inlines(&mut inline_batch, &mut children, &content_rect, &mut child_cursor, floats);
-                let cb = layout_block(child, &content_rect, &child_cb, &mut child_cursor, floats);
+                let cb = layout_block(child, &content_rect, &child_cb, &mut child_cursor, floats, &mut child_prev_margin);
                 children.push(cb);
             }
             Display::InlineBlock => {
                 let mut ib_cursor = Vec2 { x: content_rect.x, y: child_cursor.y };
-                let ib_box = layout_block(child, &content_rect, &child_cb, &mut ib_cursor, floats);
+                let mut zero_margin = 0.0f32;
+                let ib_box = layout_block(child, &content_rect, &child_cb, &mut ib_cursor, floats, &mut zero_margin);
                 inline_batch.push(InlineItem::InlineBlock(ib_box));
             }
             _ => {
@@ -420,7 +433,9 @@ fn layout_block(node: &RenderNode, containing: &Rect, _cb: &CbContext, cursor: &
 
     let content_h = child_cursor.y - content_y;
     let box_h = if h > 0.0 { h } else { content_h + p_t + p_b };
-    cursor.y = y + box_h + m_b;
+    cursor.y = y + box_h;
+
+    *prev_margin = m_b;
 
     let clip = if node.style.overflow_x != Overflow::Visible || node.style.overflow_y != Overflow::Visible {
         Some(Rect { x, y, width: content_w, height: box_h })
