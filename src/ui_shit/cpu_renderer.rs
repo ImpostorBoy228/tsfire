@@ -1,5 +1,6 @@
 use crate::font::FontHandle;
 use crate::parsing::Color;
+use crate::ui_shit::layout;
 use crate::ui_shit::paint::{DisplayCommand, DisplayList, TextRange};
 
 fn argb(c: &Color) -> u32 {
@@ -58,6 +59,21 @@ impl CpuRenderer {
     fn render_cmd(&mut self, cmd: &DisplayCommand, text_arena: &str) {
         match cmd {
             DisplayCommand::FillRect(r, c) => self.fill_rect(r, c),
+            DisplayCommand::FillGradient(r, g) => {
+                let c = Color((g.from.0 + g.to.0) / 2, (g.from.1 + g.to.1) / 2, (g.from.2 + g.to.2) / 2, 200);
+                self.fill_rect(r, &c);
+            }
+            DisplayCommand::Border(rect, sides) => {
+                let r = *rect;
+                self.fill_rect(&layout::Rect { x: r.x, y: r.y, width: r.width, height: sides[0].width }, &sides[0].color);
+                self.fill_rect(&layout::Rect { x: r.x + r.width - sides[1].width, y: r.y, width: sides[1].width, height: r.height }, &sides[1].color);
+                self.fill_rect(&layout::Rect { x: r.x, y: r.y + r.height - sides[2].width, width: r.width, height: sides[2].width }, &sides[2].color);
+                self.fill_rect(&layout::Rect { x: r.x, y: r.y, width: sides[3].width, height: r.height }, &sides[3].color);
+            }
+            DisplayCommand::DrawBoxShadow(r, c, _ox, _oy, _bl) => {
+                let sc = Color(c.0, c.1, c.2, (c.3 as f32 * 0.5) as u8);
+                self.fill_rect(r, &sc);
+            }
             DisplayCommand::TextRun(r, c, _fz, _ff, range) => {
                 self.text_run(r, c, range, text_arena);
             }

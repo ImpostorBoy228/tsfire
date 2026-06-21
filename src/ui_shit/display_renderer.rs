@@ -217,6 +217,9 @@ pub struct DisplayRenderer {
     glyph_atlas: Option<GlyphAtlas>,
     dummy_sampler: wgpu::Sampler,
     font_cache: Option<FontCache>,
+
+    clip_rect: Option<layout::Rect>,
+    global_alpha: f32,
 }
 
 fn vertex_buffer_layout_solid<'a>() -> wgpu::VertexBufferLayout<'a> {
@@ -454,6 +457,8 @@ impl DisplayRenderer {
             glyph_atlas: None,
             dummy_sampler,
             font_cache,
+            clip_rect: None,
+            global_alpha: 1.0,
         }
     }
 
@@ -500,6 +505,32 @@ impl DisplayRenderer {
                 paint::DisplayCommand::FillRect(rect, color) => {
                     self.add_fill_rect(rect, color, &mut solid_vertices);
                 }
+                paint::DisplayCommand::FillGradient(rect, _) => {
+                    self.add_fill_rect(rect, &crate::parsing::Color(200, 200, 200, 200), &mut solid_vertices);
+                }
+                paint::DisplayCommand::Border(rect, sides) => {
+                    let r = *rect;
+                    // top
+                    if sides[0].width > 0.0 && sides[0].style != paint::BorderStyle::None {
+                        self.add_fill_rect(&layout::Rect { x: r.x, y: r.y, width: r.width, height: sides[0].width }, &sides[0].color, &mut solid_vertices);
+                    }
+                    // right
+                    if sides[1].width > 0.0 && sides[1].style != paint::BorderStyle::None {
+                        self.add_fill_rect(&layout::Rect { x: r.x + r.width - sides[1].width, y: r.y, width: sides[1].width, height: r.height }, &sides[1].color, &mut solid_vertices);
+                    }
+                    // bottom
+                    if sides[2].width > 0.0 && sides[2].style != paint::BorderStyle::None {
+                        self.add_fill_rect(&layout::Rect { x: r.x, y: r.y + r.height - sides[2].width, width: r.width, height: sides[2].width }, &sides[2].color, &mut solid_vertices);
+                    }
+                    // left
+                    if sides[3].width > 0.0 && sides[3].style != paint::BorderStyle::None {
+                        self.add_fill_rect(&layout::Rect { x: r.x, y: r.y, width: sides[3].width, height: r.height }, &sides[3].color, &mut solid_vertices);
+                    }
+                }
+                paint::DisplayCommand::DrawBoxShadow(rect, color, _ox, _oy, _blur) => {
+                    let shadow_color = crate::parsing::Color(color.0, color.1, color.2, (color.3 as f32 * 0.5) as u8);
+                    self.add_fill_rect(rect, &shadow_color, &mut solid_vertices);
+                }
                 paint::DisplayCommand::TextRun(rect, color, font_size, font_family, range) => {
                     self.add_text_run(
                         list,
@@ -510,6 +541,18 @@ impl DisplayRenderer {
                         range,
                         &mut textured_vertices,
                     );
+                }
+                paint::DisplayCommand::SetClip(rect) => {
+                    self.clip_rect = Some(*rect);
+                }
+                paint::DisplayCommand::PopClip => {
+                    self.clip_rect = None;
+                }
+                paint::DisplayCommand::SetOpacity(val) => {
+                    self.global_alpha = *val;
+                }
+                paint::DisplayCommand::PopOpacity => {
+                    self.global_alpha = 1.0;
                 }
                 _ => {}
             }
@@ -577,16 +620,31 @@ impl DisplayRenderer {
         color: &parsing::Color,
         out: &mut Vec<SolidVertex>,
     ) {
-        let ndc_left = -1.0 + 2.0 * rect.x / self.width;
-        let ndc_right = -1.0 + 2.0 * (rect.x + rect.width) / self.width;
-        let ndc_top = 1.0 - 2.0 * rect.y / self.height;
-        let ndc_bottom = 1.0 - 2.0 * (rect.y + rect.height) / self.height;
+        // clip to current clip_rect
+        let r = match self.clip_rect {
+            Some(cr) => {
+                let x = rect.x.max(cr.x);
+                let y = rect.y.max(cr.y);
+                let right = (rect.x + rect.width).min(cr.x + cr.width);
+                let bottom = (rect.y + rect.height).min(cr.y + cr.height);
+                if x >= right || y >= bottom {
+                    return;
+                }
+                layout::Rect { x, y, width: right - x, height: bottom - y }
+            }
+            None => *rect,
+        };
+
+        let ndc_left = -1.0 + 2.0 * r.x / self.width;
+        let ndc_right = -1.0 + 2.0 * (r.x + r.width) / self.width;
+        let ndc_top = 1.0 - 2.0 * r.y / self.height;
+        let ndc_bottom = 1.0 - 2.0 * (r.y + r.height) / self.height;
 
         let c = [
             color.0 as f32 / 255.0,
             color.1 as f32 / 255.0,
             color.2 as f32 / 255.0,
-            color.3 as f32 / 255.0,
+            color.3 as f32 / 255.0 * self.global_alpha,
         ];
 
         out.push(SolidVertex {
@@ -649,7 +707,7 @@ impl DisplayRenderer {
         let cr = color.0 as f32 / 255.0;
         let cg = color.1 as f32 / 255.0;
         let cb = color.2 as f32 / 255.0;
-        let ca = color.3 as f32 / 255.0;
+        let ca = color.3 as f32 / 255.0 * self.global_alpha;
         let color_arr = [cr, cg, cb, ca];
 
         let baseline_y = rect.y + rect.height * 0.8;
