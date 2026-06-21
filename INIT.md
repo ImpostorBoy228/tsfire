@@ -62,7 +62,7 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 - baseline alignment + line wrapping for mixed text/inline-block content
 - flat DisplayList: FillRect, FillGradient, DrawImage, TextRun, Border, DrawBoxShadow, SetClip/PopClip, SetOpacity/PopOpacity
 - wgpu renderer with solid + gradient + textured pipelines (clip rect, opacity alpha, border 4-rect, box-shadow multi-rect blur)
-- cpu renderer fallback (minifb) — panics on gradient/texture/image commands
+- cpu renderer fallback (minifb) — gradient lerp + DrawImage blit (clip/opacity still missing)
 - image decoding via stb_image (png/jpeg/webp → rgba)
 - font decoding via freetype2 (ttf → glyph metrics + grayscale bitmap)
 - glyph atlas for wgpu text rendering (Nearest filter + pixel snapping → sharp text)
@@ -70,17 +70,17 @@ dependencies: tokio, reqwest, html5ever, markup5ever_rcdom, cssparser, selectors
 - dynamic vertex buffers (no `create_buffer_init` per frame)
 - frame rate limiter (60 FPS via `ControlFlow::WaitUntil`)
 - viewport resize → re-layout + rebuild DisplayList
-- 32 tests, all passing
+- `<img>` tag fetch + decode + DrawImage pipeline
+- word-level line wrapping with whitespace handling
+- margin collapse between block siblings (vertical max reduction)
+- 35 tests, all passing (run with `RUST_TEST_THREADS=1` to avoid race on exit)
 
 ## TODO
 
-- **word-level line wrapping** — split text at word boundaries for proper line breaking
-- **`<img>` tag fetch** — download + decode images from `<img src="...">` DOM attributes
-- **cpu_renderer** — gradient / texture / image command support (currently panics)
-- **margin collapse** — vertical margin collapsing between block elements
 - **background-repeat/position** — tiling and offset for background images
 - **incremental re-style** — handle viewport-relative CSS units on resize
 - **relative z-index** — proper stacking context ordering
+- **cpu_renderer clip/opacity** — currently unimplemented
 
 ## ai code rules
 
