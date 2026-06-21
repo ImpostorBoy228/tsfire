@@ -545,3 +545,128 @@ pub fn dump_boxes(boxes: &[LayoutBox]) {
         dump_box(box_, 0);
     }
 }
+
+// --- Tests ---
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parsing::*;
+
+    fn make_render(tag: &str, style: ComputedValues, children: Vec<RenderNode>) -> RenderNode {
+        RenderNode { tag: tag.into(), text: String::new(), style, children }
+    }
+
+    fn make_text(text: &str, style: ComputedValues) -> RenderNode {
+        RenderNode { tag: "#text".into(), text: text.into(), style, children: vec![] }
+    }
+
+    fn base_style() -> ComputedValues {
+        ComputedValues::default()
+    }
+
+    fn size(w: f32, h: f32) -> Size {
+        Size { width: w, height: h }
+    }
+
+    #[test]
+    fn test_block_layout_basic() {
+        let root = make_render("div", base_style(), vec![
+            make_render("p", base_style(), vec![
+                make_text("hello", base_style()),
+            ]),
+        ]);
+        let engine = BlockLayout;
+        let boxes = engine.layout(&root, size(800.0, 600.0));
+        assert_eq!(boxes.len(), 1);
+        assert_eq!(boxes[0].tag, "div");
+        assert_eq!(boxes[0].rect.x, 0.0);
+        assert_eq!(boxes[0].rect.y, 0.0);
+        assert_eq!(boxes[0].rect.width, 800.0);
+    }
+
+    #[test]
+    fn test_position_absolute() {
+        let mut abs_style = base_style();
+        abs_style.position = Position::Absolute;
+        abs_style.top = Length::Px(10.0);
+        abs_style.left = Length::Px(20.0);
+        abs_style.width = Length::Px(100.0);
+        abs_style.height = Length::Px(50.0);
+
+        let root = make_render("div", base_style(), vec![
+            make_render("abs", abs_style, vec![]),
+            make_render("normal", base_style(), vec![]),
+        ]);
+        let engine = BlockLayout;
+        let boxes = engine.layout(&root, size(800.0, 600.0));
+        assert_eq!(boxes.len(), 1);
+        assert_eq!(boxes[0].children.len(), 1);
+        // only normal child in normal flow, abs is positioned
+        assert_eq!(boxes[0].children[0].tag, "normal");
+    }
+
+    #[test]
+    fn test_float_left() {
+        let mut float_style = base_style();
+        float_style.float = Float::Left;
+        float_style.width = Length::Px(200.0);
+        float_style.height = Length::Px(100.0);
+
+        let root = make_render("div", base_style(), vec![
+            make_render("float", float_style, vec![]),
+            make_render("normal", base_style(), vec![
+                make_text("text after float", base_style()),
+            ]),
+        ]);
+        let engine = BlockLayout;
+        let boxes = engine.layout(&root, size(800.0, 600.0));
+        assert_eq!(boxes[0].children.len(), 2);
+        // float should be first child, positioned at left
+        assert_eq!(boxes[0].children[0].tag, "float");
+        assert_eq!(boxes[0].children[0].rect.x, 0.0);
+    }
+
+    #[test]
+    fn test_overflow_clip() {
+        let mut clip_style = base_style();
+        clip_style.overflow_x = Overflow::Hidden;
+        clip_style.overflow_y = Overflow::Hidden;
+        clip_style.width = Length::Px(100.0);
+        clip_style.height = Length::Px(100.0);
+
+        let root = make_render("clip", clip_style, vec![
+            make_render("child", base_style(), vec![]),
+        ]);
+        let engine = BlockLayout;
+        let boxes = engine.layout(&root, size(800.0, 600.0));
+        assert_eq!(boxes[0].tag, "clip");
+        assert!(boxes[0].clip_rect.is_some());
+    }
+
+    #[test]
+    fn test_margin() {
+        let mut margin_style = base_style();
+        margin_style.margin_top = Length::Px(10.0);
+        margin_style.margin_left = Length::Px(20.0);
+
+        let root = make_render("div", margin_style, vec![]);
+        let engine = BlockLayout;
+        let boxes = engine.layout(&root, size(800.0, 600.0));
+        assert_eq!(boxes[0].rect.x, 20.0);
+        assert_eq!(boxes[0].rect.y, 10.0);
+    }
+
+    #[test]
+    fn test_padding() {
+        let mut pad_style = base_style();
+        pad_style.padding_top = Length::Px(30.0);
+        pad_style.padding_left = Length::Px(40.0);
+
+        let root = make_render("div", pad_style, vec![]);
+        let engine = BlockLayout;
+        let boxes = engine.layout(&root, size(800.0, 600.0));
+        assert_eq!(boxes[0].rect.x, 0.0);
+        assert_eq!(boxes[0].rect.y, 0.0);
+    }
+}

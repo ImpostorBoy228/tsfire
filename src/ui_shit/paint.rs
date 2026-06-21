@@ -1,5 +1,5 @@
 use crate::ui_shit::layout::{LayoutBox, Rect, Size};
-use crate::parsing::{Color, Display};
+use crate::parsing::{Color, Display, BorderStyle as ParsedBorderStyle, Overflow, ComputedValues};
 
 // --- Data types ---
 
@@ -9,6 +9,7 @@ pub enum BorderStyle {
     Solid,
     Dashed,
     Dotted,
+    Double,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -92,23 +93,41 @@ fn box_tree_extent(boxes: &[LayoutBox]) -> Size {
 }
 
 fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut String) {
-    // 1. background
-    let bg = box_.style.background_color;
-    if !is_transparent(&bg) && !is_white(&bg) {
-        items.push(DisplayCommand::FillRect(box_.rect, bg));
+    if box_.style.opacity < 1.0 {
+        items.push(DisplayCommand::SetOpacity(box_.style.opacity));
+    }
+
+    // 1. background fill / gradient
+    if let Some(bi) = box_.style.background_image.first() {
+        match bi {
+            crate::parsing::BackgroundImage::Gradient { from, to, vertical } => {
+                items.push(DisplayCommand::FillGradient(box_.rect, Gradient { from: *from, to: *to, vertical: *vertical }));
+            }
+            _ => {}
+        }
+    } else {
+        let bg = box_.style.background_color;
+        if !is_transparent(&bg) && !is_white(&bg) {
+            items.push(DisplayCommand::FillRect(box_.rect, bg));
+        }
+    }
+
+    // 2. clip
+    if let Some(cr) = box_.clip_rect {
+        items.push(DisplayCommand::SetClip(cr));
     }
 
     // Paint-order sorting for children
     let (neg, zero, pos) = partition_by_z_index(&box_.children);
 
-    // 2. z-index < 0 (ascending)
+    // 3. z-index < 0 (ascending)
     for child in &neg {
         if child.style.display == Display::Block {
             paint_box(child, items, text_arena);
         }
     }
 
-    // 3. z-index == 0 block then inline
+    // 4. z-index == 0 block then inline
     for child in &zero {
         if child.style.display == Display::Block {
             paint_box(child, items, text_arena);
@@ -120,12 +139,21 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
         }
     }
 
-    // 4. z-index > 0 (ascending)
+    // 5. z-index > 0 (ascending)
     for child in &pos {
         paint_box(child, items, text_arena);
     }
 
-    // 5. text
+    // 6. positioned children (painted above normal flow)
+    for _child in &box_.positioned_children {
+        let (neg_p, zero_p, pos_p) = partition_by_z_index(&box_.positioned_children);
+        for c in &neg_p { paint_box(c, items, text_arena); }
+        for c in &zero_p { paint_box(c, items, text_arena); }
+        for c in &pos_p { paint_box(c, items, text_arena); }
+        break;
+    }
+
+    // 7. text
     if box_.tag == "#text" && !box_.text.is_empty() {
         let start = text_arena.len() as u32;
         text_arena.push_str(&box_.text);
@@ -138,12 +166,18 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
         ));
     }
 
-    // 6. border
-    let bw = detect_border_width(box_);
-    if bw > 0.0 {
-        let bc = detect_border_color(box_);
-        let side = BorderSide { width: bw, color: bc, style: BorderStyle::Solid };
-        items.push(DisplayCommand::Border(box_.rect, [side; 4]));
+    // 8. border
+    let sides = extract_border(box_);
+    if has_visible_border(&sides) {
+        items.push(DisplayCommand::Border(box_.rect, sides));
+    }
+
+    if let Some(_) = box_.clip_rect {
+        items.push(DisplayCommand::PopClip);
+    }
+
+    if box_.style.opacity < 1.0 {
+        items.push(DisplayCommand::PopOpacity);
     }
 }
 
@@ -151,6 +185,32 @@ fn paint_box(box_: &LayoutBox, items: &mut Vec<DisplayCommand>, text_arena: &mut
 
 fn is_transparent(c: &Color) -> bool { c.3 == 0 }
 fn is_white(c: &Color) -> bool { c.0 == 255 && c.1 == 255 && c.2 == 255 && c.3 == 255 }
+
+fn to_paint_border_style(s: ParsedBorderStyle) -> BorderStyle {
+    match s {
+        ParsedBorderStyle::None => BorderStyle::None,
+        ParsedBorderStyle::Solid => BorderStyle::Solid,
+        ParsedBorderStyle::Dashed => BorderStyle::Dashed,
+        ParsedBorderStyle::Dotted => BorderStyle::Dotted,
+        ParsedBorderStyle::Double => BorderStyle::Double,
+        _ => BorderStyle::Solid,
+    }
+}
+
+fn has_visible_border(sides: &[BorderSide; 4]) -> bool {
+    sides.iter().any(|s| s.width > 0.0 && s.style != BorderStyle::None)
+}
+
+fn extract_border(box_: &LayoutBox) -> [BorderSide; 4] {
+    let s = &box_.style;
+    let bw = |w: f32| if w > 0.0 { w } else { 0.0 };
+    [
+        BorderSide { width: bw(s.border_top_width), color: s.border_top_color, style: to_paint_border_style(s.border_top_style) },
+        BorderSide { width: bw(s.border_right_width), color: s.border_right_color, style: to_paint_border_style(s.border_right_style) },
+        BorderSide { width: bw(s.border_bottom_width), color: s.border_bottom_color, style: to_paint_border_style(s.border_bottom_style) },
+        BorderSide { width: bw(s.border_left_width), color: s.border_left_color, style: to_paint_border_style(s.border_left_style) },
+    ]
+}
 
 fn partition_by_z_index(children: &[LayoutBox]) -> (Vec<&LayoutBox>, Vec<&LayoutBox>, Vec<&LayoutBox>) {
     let mut neg = Vec::new();
@@ -204,5 +264,138 @@ pub fn dump_display_list(list: &DisplayList) {
             DisplayCommand::PopOpacity =>
                 println!("  {:4}. PopOpacity", i),
         }
+    }
+}
+
+// --- Tests ---
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_shit::layout::LayoutBox;
+
+    fn make_layout(tag: &str, style: ComputedValues, children: Vec<LayoutBox>) -> LayoutBox {
+        LayoutBox {
+            tag: tag.into(), text: String::new(), style, rect: Rect { x: 0.0, y: 0.0, width: 100.0, height: 50.0 },
+            children, positioned_children: vec![], clip_rect: None,
+        }
+    }
+
+    fn make_text_box(text: &str) -> LayoutBox {
+        let mut s = ComputedValues::default();
+        s.color = Color(0, 0, 0, 255);
+        LayoutBox {
+            tag: "#text".into(), text: text.into(), style: s,
+            rect: Rect { x: 10.0, y: 10.0, width: 80.0, height: 20.0 },
+            children: vec![], positioned_children: vec![], clip_rect: None,
+        }
+    }
+
+    fn collect_names(list: &DisplayList) -> Vec<&'static str> {
+        list.items.iter().map(|cmd| {
+            match cmd {
+                DisplayCommand::FillRect(..) => "FillRect",
+                DisplayCommand::FillGradient(..) => "FillGradient",
+                DisplayCommand::DrawImage(..) => "DrawImage",
+                DisplayCommand::TextRun(..) => "TextRun",
+                DisplayCommand::Border(..) => "Border",
+                DisplayCommand::SetClip(..) => "SetClip",
+                DisplayCommand::PopClip => "PopClip",
+                DisplayCommand::SetOpacity(..) => "SetOpacity",
+                DisplayCommand::PopOpacity => "PopOpacity",
+            }
+        }).collect()
+    }
+
+    #[test]
+    fn test_empty_display_list() {
+        let dl = build_display_list(&[]);
+        assert!(dl.items.is_empty());
+    }
+
+    #[test]
+    fn test_text_run() {
+        let box_ = make_text_box("hello");
+        let dl = build_display_list(&[box_]);
+        assert_eq!(collect_names(&dl), vec!["TextRun"]);
+    }
+
+    #[test]
+    fn test_border_generated() {
+        let mut s = ComputedValues::default();
+        s.border_top_width = 2.0;
+        s.border_top_style = ParsedBorderStyle::Solid;
+        s.border_top_color = Color(255, 0, 0, 255);
+        s.border_right_width = 2.0;
+        s.border_right_style = ParsedBorderStyle::Solid;
+        s.border_bottom_width = 2.0;
+        s.border_bottom_style = ParsedBorderStyle::Solid;
+        s.border_left_width = 2.0;
+        s.border_left_style = ParsedBorderStyle::Solid;
+
+        let box_ = make_layout("div", s, vec![]);
+        let dl = build_display_list(&[box_]);
+        let names = collect_names(&dl);
+        assert!(names.contains(&"Border"), "expected Border command, got {:?}", names);
+    }
+
+    #[test]
+    fn test_no_border_when_zero_width() {
+        let s = ComputedValues::default();
+        let box_ = make_layout("div", s, vec![]);
+        let dl = build_display_list(&[box_]);
+        let names = collect_names(&dl);
+        assert!(!names.contains(&"Border"));
+    }
+
+    #[test]
+    fn test_opacity_wrapping() {
+        let mut s = ComputedValues::default();
+        s.opacity = 0.5;
+        let child = make_text_box("inner");
+        let box_ = make_layout("div", s, vec![child]);
+        let dl = build_display_list(&[box_]);
+        let names = collect_names(&dl);
+        assert!(names.contains(&"SetOpacity"), "expected SetOpacity, got {:?}", names);
+        assert!(names.contains(&"PopOpacity"), "expected PopOpacity, got {:?}", names);
+        let pos_set = names.iter().position(|&n| n == "SetOpacity").unwrap();
+        let pos_pop = names.iter().position(|&n| n == "PopOpacity").unwrap();
+        assert!(pos_set < pos_pop, "SetOpacity should come before PopOpacity");
+    }
+
+    #[test]
+    fn test_clip_wrapping() {
+        let mut s = ComputedValues::default();
+        s.overflow_x = Overflow::Hidden;
+        s.overflow_y = Overflow::Hidden;
+        let mut box_ = make_layout("div", s, vec![]);
+        box_.clip_rect = Some(Rect { x: 0.0, y: 0.0, width: 100.0, height: 50.0 });
+        let dl = build_display_list(&[box_]);
+        let names = collect_names(&dl);
+        assert!(names.contains(&"SetClip"), "expected SetClip, got {:?}", names);
+        assert!(names.contains(&"PopClip"), "expected PopClip, got {:?}", names);
+    }
+
+    #[test]
+    fn test_background_gradient() {
+        let mut s = ComputedValues::default();
+        s.background_image = vec![crate::parsing::BackgroundImage::Gradient {
+            from: Color(255, 0, 0, 255),
+            to: Color(0, 0, 255, 255),
+            vertical: true,
+        }];
+        let box_ = make_layout("div", s, vec![]);
+        let dl = build_display_list(&[box_]);
+        let names = collect_names(&dl);
+        assert!(names.contains(&"FillGradient"), "expected FillGradient, got {:?}", names);
+    }
+
+    #[test]
+    fn test_children_are_painted() {
+        let child = make_text_box("child");
+        let box_ = make_layout("div", ComputedValues::default(), vec![child]);
+        let dl = build_display_list(&[box_]);
+        let names = collect_names(&dl);
+        assert!(names.contains(&"TextRun"));
     }
 }

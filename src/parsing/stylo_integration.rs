@@ -834,6 +834,117 @@ pub fn convert_stylo_computed_values(stylo: &ComputedValues) -> crate::parsing::
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_stylo_cv(css: &str) -> ComputedValues {
+        let stylist = create_global_stylist();
+        let pdb = parse_css_declarations(css);
+        let lock = GUARD_LOCK.get_or_init(|| SharedRwLock::new_leaked());
+        let wrapped = Arc::new(lock.wrap(pdb));
+        let guard = lock.read();
+        let guards = StylesheetGuards::same(&guard);
+        let arc = stylist.compute_for_declarations::<PhantomElement>(
+            &guards,
+            stylist.device().default_computed_values(),
+            wrapped,
+        );
+        (*arc).clone()
+    }
+
+    fn extract(css: &str) -> crate::parsing::ComputedValues {
+        convert_stylo_computed_values(&make_stylo_cv(css))
+    }
+
+    #[test]
+    fn test_border_widths() {
+        let cv = extract("border-top-width:5px;border-right-width:10px;border-bottom-width:15px;border-left-width:20px");
+        assert_eq!(cv.border_top_width, 5.0);
+        assert_eq!(cv.border_right_width, 10.0);
+        assert_eq!(cv.border_bottom_width, 15.0);
+        assert_eq!(cv.border_left_width, 20.0);
+    }
+
+    #[test]
+    fn test_border_styles() {
+        let cv = extract("border-top-style:dashed;border-right-style:dotted;border-bottom-style:double;border-left-style:groove");
+        assert_eq!(cv.border_top_style, crate::parsing::BorderStyle::Dashed);
+        assert_eq!(cv.border_right_style, crate::parsing::BorderStyle::Dotted);
+        assert_eq!(cv.border_bottom_style, crate::parsing::BorderStyle::Double);
+        assert_eq!(cv.border_left_style, crate::parsing::BorderStyle::Groove);
+    }
+
+    #[test]
+    fn test_opacity() {
+        let cv = extract("opacity:0.42");
+        assert!((cv.opacity - 0.42).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_overflow() {
+        let cv = extract("overflow:hidden");
+        assert_eq!(cv.overflow_x, crate::parsing::Overflow::Hidden);
+        assert_eq!(cv.overflow_y, crate::parsing::Overflow::Hidden);
+    }
+
+    #[test]
+    fn test_overflow_individual() {
+        let cv = extract("overflow-x:scroll;overflow-y:hidden");
+        assert_eq!(cv.overflow_x, crate::parsing::Overflow::Scroll);
+        assert_eq!(cv.overflow_y, crate::parsing::Overflow::Hidden);
+    }
+
+    #[test]
+    fn test_float_clear() {
+        let cv = extract("float:left;clear:both");
+        assert_eq!(cv.float, crate::parsing::Float::Left);
+        assert_eq!(cv.clear, crate::parsing::Clear::Both);
+    }
+
+    #[test]
+    fn test_position_offsets() {
+        let cv = extract("top:10px;right:20px;bottom:30px;left:40px");
+        assert_eq!(cv.top, crate::parsing::Length::Px(10.0));
+        assert_eq!(cv.right, crate::parsing::Length::Px(20.0));
+        assert_eq!(cv.bottom, crate::parsing::Length::Px(30.0));
+        assert_eq!(cv.left, crate::parsing::Length::Px(40.0));
+    }
+
+    #[test]
+    fn test_text_decoration() {
+        let cv = extract("text-decoration:underline;text-decoration-color:red");
+        assert!(cv.text_decoration_line.underline);
+        assert_eq!(cv.text_decoration_color, crate::parsing::Color(255, 0, 0, 255));
+    }
+
+    #[test]
+    fn test_outline() {
+        let cv = extract("outline-width:3px;outline-style:solid;outline-color:#ff0000");
+        assert_eq!(cv.outline_width, 3.0);
+        assert_eq!(cv.outline_style, crate::parsing::BorderStyle::Solid);
+        assert_eq!(cv.outline_color, crate::parsing::Color(255, 0, 0, 255));
+    }
+
+    #[test]
+    fn test_z_index() {
+        let cv = extract("z-index:42");
+        assert_eq!(cv.z_index, 42);
+    }
+
+    #[test]
+    fn test_display_none() {
+        let cv = extract("display:none");
+        assert_eq!(cv.display, crate::parsing::Display::None);
+    }
+
+    #[test]
+    fn test_display_inline() {
+        let cv = extract("display:inline");
+        assert_eq!(cv.display, crate::parsing::Display::Inline);
+    }
+}
+
 /// Compute style for an element using Stylo, returning our custom format
 pub fn compute_style_bridge(
     stylist: &Stylist,
